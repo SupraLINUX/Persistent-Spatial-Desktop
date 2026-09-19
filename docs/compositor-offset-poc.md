@@ -16,10 +16,11 @@ This makes it a useful low-level proof-of-concept target for PSD.
 
 ## Experimental plugin
 
-The optional build target `psd-hyprland-plugin` registers two internal dispatchers:
+The optional build target `psd-hyprland-plugin` registers three internal dispatchers:
 
 - `plugin:psd:offset <monitor> <x> <y>`
 - `plugin:psd:reset <monitor>`
+- `plugin:psd:gesture-events <0|1>`
 
 The offset command applies a render offset to the active regular workspace of the explicitly named monitor and damages only that monitor.
 
@@ -29,7 +30,7 @@ The experiment refuses:
 - special workspaces;
 - workspaces containing fullscreen content.
 
-Plugin unload resets every workspace touched by this experiment.
+Plugin unload resets every workspace touched by this experiment. Four-finger gesture interception is disabled by default and must be explicitly armed.
 
 ## Build
 
@@ -60,6 +61,9 @@ After loading the plugin, examples are:
 hyprctl dispatch plugin:psd:offset 'DP-1 160 0'
 hyprctl dispatch plugin:psd:offset 'DP-1 0 120'
 hyprctl dispatch plugin:psd:reset 'DP-1'
+hyprctl dispatch plugin:psd:gesture-events 1
+# test the four-finger feed
+hyprctl dispatch plugin:psd:gesture-events 0
 ```
 
 ## Runtime-driven experiment
