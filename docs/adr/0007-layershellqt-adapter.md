@@ -35,7 +35,7 @@ The bootstrap shell maps as:
 - anchored to all four monitor edges;
 - exclusive zone: -1;
 - keyboard interactivity: OnDemand;
-- scope: `psd-shell`.
+- scope: `psd-shell:<output-name>`.
 
 This lets the persistent shell occupy the full monitor without reserving panel space while ordinary application windows remain compositor-owned above it.
 
@@ -44,7 +44,7 @@ This lets the persistent shell occupy the full monitor without reserving panel s
 - PSD avoids maintaining QtWayland-private integration code;
 - the runtime gains a small packaged dependency;
 - shell surfaces can remain stationary while the compositor plugin experiments with workspace render offsets;
-- multi-monitor support will later instantiate one shell layer surface per output.
+- the runtime instantiates one shell layer surface per Qt/Wayland output and keeps spatial state independent per monitor.
 
 ## Revisit condition
 
