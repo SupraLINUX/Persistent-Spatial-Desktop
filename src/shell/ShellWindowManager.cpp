@@ -18,8 +18,6 @@
 #include <QScreen>
 #include <QUrl>
 
-#include <algorithm>
-#include <cmath>
 
 ShellWindowManager::ShellWindowManager(
     QQmlApplicationEngine *engine,
@@ -238,23 +236,7 @@ void ShellWindowManager::updateReturnShield(Instance *instance)
     const QSizeF viewport = instance->layout->viewportSize();
     const int width = std::max(0, qRound(viewport.width()));
     const int height = std::max(0, qRound(viewport.height()));
-    const int gutter = std::max(0, qRound(instance->layout->gutter()));
-
-    QMargins margins;
-
-    if (surface == QStringLiteral("left")) {
-        margins = QMargins(qRound(instance->layout->leftWidth()), gutter, 0, gutter);
-    } else if (surface == QStringLiteral("right")) {
-        margins = QMargins(0, gutter, qRound(instance->layout->rightWidth()), gutter);
-    } else if (surface == QStringLiteral("top")) {
-        margins = QMargins(gutter, qRound(instance->layout->topHeight()), gutter, 0);
-    } else if (surface == QStringLiteral("dash")) {
-        const int visibleCenter = std::min(height, gutter * 2);
-        margins = QMargins(gutter, 0, gutter, std::max(0, height - visibleCenter));
-    } else {
-        instance->returnShield->hide();
-        return;
-    }
+    const QMargins margins = instance->layout->returnShieldMargins(surface);
 
     if (width <= margins.left() + margins.right()
         || height <= margins.top() + margins.bottom()) {
