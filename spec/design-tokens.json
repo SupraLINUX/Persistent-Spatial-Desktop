@@ -1,0 +1,99 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "specVersion": "0.1.0",
+  "designSystem": "Spatial Glass",
+  "colors": {
+    "background": {
+      "deep": "#0C1018",
+      "navy": "#11192D",
+      "spatialBlue": "#25355F",
+      "deepViolet": "#302744",
+      "depthViolet": "#25203B"
+    },
+    "accent": {
+      "primary": "#A9B7FF",
+      "secondary": "#8E7CFF"
+    },
+    "text": {
+      "primary": "#F6F7FB",
+      "secondary": "rgba(246,247,251,0.68)",
+      "muted": "rgba(246,247,251,0.48)",
+      "disabled": "rgba(246,247,251,0.30)"
+    },
+    "border": {
+      "default": "rgba(255,255,255,0.10)",
+      "focused": "rgba(255,255,255,0.16)",
+      "unfocused": "rgba(255,255,255,0.08)"
+    }
+  },
+  "radius": {
+    "smallControl": 12,
+    "input": 14,
+    "card": 16,
+    "window": 18,
+    "largePanel": 20,
+    "workspace": 24
+  },
+  "spacing": {
+    "xs": 4,
+    "sm": 8,
+    "md": 12,
+    "lg": 16,
+    "xl": 24,
+    "2xl": 32,
+    "3xl": 48
+  },
+  "typography": {
+    "preferredFamily": "Inter Variable",
+    "fallbackFamilies": [
+      "Noto Sans",
+      "Ubuntu Sans",
+      "system-ui"
+    ],
+    "size": {
+      "caption": 11,
+      "secondary": 13,
+      "body": 14,
+      "heading": 18,
+      "title": 24,
+      "display": 34
+    }
+  },
+  "motion": {
+    "durationMs": {
+      "hover": 120,
+      "control": 150,
+      "popover": 180,
+      "windowOpen": 200,
+      "snap": 220,
+      "spatial": 500
+    },
+    "spatialEasing": "cubic-bezier(.22,.85,.26,1)",
+    "touchpadTracking": "1:1"
+  },
+  "blur": {
+    "modes": [
+      "off",
+      "reduced",
+      "standard"
+    ],
+    "standardRadiusLogical": 24
+  },
+  "shadow": {
+    "window": {
+      "offsetY": 22,
+      "blur": 56,
+      "opacity": 0.33
+    },
+    "workspace": {
+      "offsetY": 24,
+      "blur": 88,
+      "opacity": 0.48
+    },
+    "popover": {
+      "offsetY": 12,
+      "blur": 32,
+      "opacity": 0.3
+    }
+  }
+}
