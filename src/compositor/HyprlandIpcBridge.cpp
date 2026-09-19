@@ -403,6 +403,7 @@ void HyprlandIpcBridge::requestText(const QByteArray &request, ResponseCallback 
 
     auto *socket = new QLocalSocket(this);
     auto completed = std::make_shared<bool>(false);
+    auto sharedCallback = std::make_shared<ResponseCallback>(std::move(callback));
     auto *timeout = new QTimer(socket);
     timeout->setSingleShot(true);
     timeout->setInterval(1000);
@@ -417,9 +418,9 @@ void HyprlandIpcBridge::requestText(const QByteArray &request, ResponseCallback 
         return true;
     };
 
-    connect(timeout, &QTimer::timeout, this, [callback, finish] {
+    connect(timeout, &QTimer::timeout, this, [sharedCallback, finish] {
         if (finish())
-            callback(QByteArrayLiteral("PSD: Hyprland IPC request timed out"));
+            (*sharedCallback)(QByteArrayLiteral("PSD: Hyprland IPC request timed out"));
     });
 
     connect(socket, &QLocalSocket::connected, this, [socket, request, timeout] {
@@ -429,18 +430,18 @@ void HyprlandIpcBridge::requestText(const QByteArray &request, ResponseCallback 
     });
 
     connect(socket, &QLocalSocket::readyRead, this,
-            [socket, callback = std::move(callback), finish] {
+            [socket, sharedCallback, finish] {
         const QByteArray response = socket->readAll();
         if (finish())
-            callback(response);
+            (*sharedCallback)(response);
     });
 
     connect(socket, &QLocalSocket::errorOccurred, this,
-            [socket, callback, finish](QLocalSocket::LocalSocketError error) {
+            [socket, sharedCallback, finish](QLocalSocket::LocalSocketError error) {
         if (error == QLocalSocket::PeerClosedError)
             return;
         if (finish())
-            callback(QByteArrayLiteral("PSD: ") + socket->errorString().toUtf8());
+            (*sharedCallback)(QByteArrayLiteral("PSD: ") + socket->errorString().toUtf8());
     });
 
     socket->connectToServer(m_commandSocketPath, QIODevice::ReadWrite);
