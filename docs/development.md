@@ -111,3 +111,18 @@ See `docs/compositor-bridge.md`.
 - public D-Bus/IPC automation.
 
 Those are subsequent implementation milestones and must use the versioned contracts in `docs/` and `spec/`.
+
+## Headless compositor integration probe
+
+`tests/integration/probe-hyprland-plugin.sh` can launch Hyprland with its headless output backend, load the PSD plugin, validate the JSON capability handshake, and exercise monitor-scoped offset/reset.
+
+Run it on a Linux machine with a DRM render node:
+
+```bash
+sudo apt install hyprland python3
+bash tests/integration/probe-hyprland-plugin.sh
+```
+
+The probe is intentionally not part of GitHub-hosted CI. Hyprland 0.53.3 uses Aquamarine 0.10, whose backend startup requires a DRM-backed allocator even for the headless output backend. Standard hosted GitHub containers do not expose `/dev/dri/renderD*`, so Hyprland aborts before its IPC sockets are created.
+
+This is an infrastructure limitation, not a plugin compile failure. The normal Ubuntu 26.04 CI still compiles both the shell and the ABI-sensitive plugin on every PR.
