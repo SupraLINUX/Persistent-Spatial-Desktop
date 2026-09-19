@@ -190,10 +190,12 @@ Item {
 
                 const stream = CompositorBridge.eventStreamConnected ? "LIVE" : "IPC"
                 const plugin = CompositorBridge.capabilities.spatialRenderOffsetExperimental ? " · PSD PLUGIN" : ""
+                const sync = PsdCompositorSync.active ? " · SYNC" : ""
                 return "HYPRLAND · " + stream
                     + " · " + CompositorBridge.monitors.length + " MON"
                     + " · " + CompositorBridge.windows.length + " WIN"
                     + plugin
+                    + sync
             }
             color: CompositorBridge.eventStreamConnected
                 ? DesignTokens.value("colors.text.secondary")
