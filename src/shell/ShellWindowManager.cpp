@@ -33,6 +33,33 @@ ShellWindowManager::ShellWindowManager(
     Q_ASSERT(m_engine);
     Q_ASSERT(m_designTokens);
     Q_ASSERT(m_compositorBridge);
+
+    connect(m_compositorBridge, &HyprlandIpcBridge::experimentalSpatialGestureBegin,
+            this, [this](const QString &monitorName) {
+        Instance *instance = instanceForMonitorName(monitorName);
+        if (!instance || !instance->compositorSync || !instance->compositorSync->active())
+            return;
+
+        instance->motion->beginGesture();
+    });
+
+    connect(m_compositorBridge, &HyprlandIpcBridge::experimentalSpatialGestureUpdate,
+            this, [this](const QString &monitorName, double deltaX, double deltaY) {
+        Instance *instance = instanceForMonitorName(monitorName);
+        if (!instance || !instance->compositorSync || !instance->compositorSync->active())
+            return;
+
+        instance->motion->updateGesture(deltaX, deltaY);
+    });
+
+    connect(m_compositorBridge, &HyprlandIpcBridge::experimentalSpatialGestureEnd,
+            this, [this](const QString &monitorName, double velocityX, double velocityY, bool cancelled) {
+        Instance *instance = instanceForMonitorName(monitorName);
+        if (!instance || !instance->compositorSync || !instance->compositorSync->active())
+            return;
+
+        instance->motion->endGesture(velocityX, velocityY, cancelled);
+    });
 }
 
 void ShellWindowManager::start()
@@ -250,4 +277,14 @@ void ShellWindowManager::updateReturnShield(Instance *instance)
     layerWindow->setMargins(margins);
     if (!instance->returnShield->isVisible())
         instance->returnShield->show();
+}
+
+ShellWindowManager::Instance *ShellWindowManager::instanceForMonitorName(const QString &monitorName) const
+{
+    for (Instance *instance : m_instances) {
+        if (instance && instance->screen && instance->screen->name() == monitorName)
+            return instance;
+    }
+
+    return nullptr;
 }
