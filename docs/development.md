@@ -87,22 +87,22 @@ It then connects to Hyprland's documented command and event UNIX sockets.
 
 ## Current compositor boundary
 
-The Hyprland IPC bridge is intentionally read-only.
+The normal compositor state/introspection path is read-only. Experimental render-offset commands are available only when the PSD Hyprland plugin is loaded and explicitly enabled.
 
-It currently issues:
+The read-only path currently issues:
 
 - `j/monitors`;
 - `j/workspaces`;
 - `j/clients`.
 
-The next compositor milestone is not more shell mock UI. It is a compositor-side spatial-transform proof of concept capable of moving CENTER and real client windows coherently on one monitor.
+The repository now contains a monitor-scoped compositor render-offset proof of concept. It remains disabled by default. Set `PSD_EXPERIMENTAL_HYPRLAND_SYNC=1` only in a matching Hyprland test session after loading `psd-hyprland-plugin`.
 
 See `docs/compositor-bridge.md`.
 
 ## What is not implemented yet
 
 - production login/session entry;
-- compositor-level spatial transform;
+- validated production compositor-level spatial transform;
 - production adoption of the experimental Hyprland render-offset mechanism;
 - real desktop icons/files;
 - notifications/control center/search providers;
