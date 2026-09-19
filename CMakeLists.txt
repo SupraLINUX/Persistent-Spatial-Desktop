@@ -13,7 +13,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 include(CTest)
 
-find_package(Qt6 6.10 REQUIRED COMPONENTS Core Gui Qml Quick)
+find_package(Qt6 6.10 REQUIRED COMPONENTS Core Gui Network Qml Quick)
 qt_standard_project_setup(REQUIRES 6.10)
 
 add_library(psd-core STATIC
@@ -21,6 +21,12 @@ add_library(psd-core STATIC
     src/core/DesignTokens.h
     src/core/SpatialState.cpp
     src/core/SpatialState.h
+    src/compositor/CompositorBridge.cpp
+    src/compositor/CompositorBridge.h
+    src/compositor/HyprlandIpcBridge.cpp
+    src/compositor/HyprlandIpcBridge.h
+    src/compositor/HyprlandProtocol.cpp
+    src/compositor/HyprlandProtocol.h
 )
 
 target_include_directories(psd-core
@@ -31,6 +37,7 @@ target_include_directories(psd-core
 target_link_libraries(psd-core
     PUBLIC
         Qt6::Core
+        Qt6::Network
 )
 
 qt_add_executable(psd-shell
