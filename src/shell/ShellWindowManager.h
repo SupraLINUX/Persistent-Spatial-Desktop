@@ -39,6 +39,8 @@ private:
         QPointer<SpatialLayout> layout;
         QPointer<SpatialMotionController> motion;
         QPointer<SpatialCompositorSync> compositorSync;
+        bool fullscreenSuppressed = false;
+        bool fullscreenStateInitialized = false;
     };
 
     void createForScreen(QScreen *screen);
@@ -46,6 +48,8 @@ private:
     void configureLayerSurface(Instance *instance);
     void configureReturnShield(Instance *instance);
     void updateReturnShield(Instance *instance);
+    void updateFullscreenState(Instance *instance);
+    void updateAllFullscreenStates();
     [[nodiscard]] Instance *instanceForMonitorName(const QString &monitorName) const;
 
     QQmlApplicationEngine *m_engine = nullptr;
