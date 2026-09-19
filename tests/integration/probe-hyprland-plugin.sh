@@ -22,6 +22,7 @@ mkdir -p "$XDG_RUNTIME_DIR"
 chmod 700 "$XDG_RUNTIME_DIR"
 
 LOG_FILE="${TMPDIR:-/tmp}/psd-hyprland-headless.log"
+export HYPRLAND_HEADLESS_ONLY=1
 Hyprland --i-am-really-stupid --config "$CONFIG_PATH" >"$LOG_FILE" 2>&1 &
 HYPRLAND_PID=$!
 
@@ -34,15 +35,6 @@ cleanup() {
     wait "$HYPRLAND_PID" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
-
-export HYPRLAND_HEADLESS_ONLY=1
-
-# Hyprland reads HYPRLAND_HEADLESS_ONLY at process startup, so restart with the
-# variable in the process environment if this script was invoked directly.
-kill "$HYPRLAND_PID" >/dev/null 2>&1 || true
-wait "$HYPRLAND_PID" >/dev/null 2>&1 || true
-HYPRLAND_HEADLESS_ONLY=1 Hyprland --i-am-really-stupid --config "$CONFIG_PATH" >"$LOG_FILE" 2>&1 &
-HYPRLAND_PID=$!
 
 instance_dir=""
 for _ in $(seq 1 100); do
