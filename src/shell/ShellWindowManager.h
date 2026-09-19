@@ -10,6 +10,7 @@ class QQmlApplicationEngine;
 class QQmlContext;
 class QQuickWindow;
 class QScreen;
+class SpatialCompositorSync;
 class SpatialLayout;
 class SpatialMotionController;
 class SpatialState;
@@ -36,6 +37,7 @@ private:
         QPointer<SpatialState> state;
         QPointer<SpatialLayout> layout;
         QPointer<SpatialMotionController> motion;
+        QPointer<SpatialCompositorSync> compositorSync;
     };
 
     void createForScreen(QScreen *screen);
