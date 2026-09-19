@@ -3,6 +3,8 @@
 #include "compositor/CompositorBridge.h"
 
 #include <QByteArray>
+#include <QHash>
+#include <QPointF>
 #include <QLocalSocket>
 #include <QTimer>
 
@@ -28,6 +30,9 @@ public:
 signals:
     void instanceSignatureChanged();
     void experimentalSpatialCommandFinished(const QString &monitorName, bool success, const QString &message);
+    void experimentalSpatialGestureBegin(const QString &monitorName);
+    void experimentalSpatialGestureUpdate(const QString &monitorName, double deltaX, double deltaY);
+    void experimentalSpatialGestureEnd(const QString &monitorName, double velocityX, double velocityY, bool cancelled);
 
 private:
     enum RefreshFlag : quint8 {
@@ -51,6 +56,12 @@ private:
     void refreshWindows();
     void requestJson(const QByteArray &request, ResponseCallback callback, bool reportParseErrors = true);
     void requestText(const QByteArray &request, ResponseCallback callback);
+    void cancelSpatialGestures();
+
+    struct GestureSample {
+        quint32 timeMs = 0;
+        QPointF velocity;
+    };
 
     QString m_instanceSignature;
     QString m_commandSocketPath;
@@ -60,4 +71,5 @@ private:
     QTimer m_refreshTimer;
     QTimer m_reconnectTimer;
     quint8 m_pendingRefresh = RefreshNone;
+    QHash<QString, GestureSample> m_gestureSamples;
 };
