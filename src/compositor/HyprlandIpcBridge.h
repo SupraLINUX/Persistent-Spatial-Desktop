@@ -21,9 +21,13 @@ public:
 
     void start() override;
     Q_INVOKABLE void refreshAll() override;
+    Q_INVOKABLE void refreshCapabilities();
+    Q_INVOKABLE void setExperimentalSpatialOffset(double x, double y);
+    Q_INVOKABLE void resetExperimentalSpatialOffset();
 
 signals:
     void instanceSignatureChanged();
+    void experimentalSpatialCommandFinished(bool success, const QString &message);
 
 private:
     enum RefreshFlag : quint8 {
@@ -34,7 +38,7 @@ private:
         RefreshEverything = RefreshMonitors | RefreshWorkspaces | RefreshWindows,
     };
 
-    using JsonCallback = std::function<void(const QByteArray &)>;
+    using ResponseCallback = std::function<void(const QByteArray &)>;
 
     void discoverInstance();
     void connectEventStream();
@@ -45,7 +49,8 @@ private:
     void refreshMonitors();
     void refreshWorkspaces();
     void refreshWindows();
-    void requestJson(const QByteArray &request, JsonCallback callback);
+    void requestJson(const QByteArray &request, ResponseCallback callback, bool reportParseErrors = true);
+    void requestText(const QByteArray &request, ResponseCallback callback);
 
     QString m_instanceSignature;
     QString m_commandSocketPath;
