@@ -1,6 +1,6 @@
 # Development bootstrap
 
-PSD currently has a minimal real Qt 6/QML runtime plus the first Hyprland compositor-state bridge. It is not yet a complete desktop session and does not yet transform compositor-owned application windows.
+PSD currently has a minimal real Qt 6/QML runtime, a Hyprland compositor-state bridge, and an opt-in compositor transform/gesture experiment. It is not yet a complete desktop session and the compositor integration is not yet production-validated.
 
 ## Baseline
 
@@ -83,6 +83,7 @@ It then connects to Hyprland's documented command and event UNIX sockets.
 - Hyprland IPC state backend;
 - monitor/workspace/window normalization;
 - live event socket;
+- opt-in four-finger swipe event bridge from the Hyprland plugin into the monitor-local motion controller;
 - event-coalesced state refreshes;
 - no compositor polling loop;
 - unit tests for tokens, spatial state, responsive geometry, motion authority and Hyprland protocol parsing.
@@ -108,7 +109,7 @@ See `docs/compositor-bridge.md`.
 - production adoption of the experimental Hyprland render-offset mechanism;
 - real desktop icons/files;
 - notifications/control center/search providers;
-- compositor/input feed for real four-finger touchpad gestures;
+- real-session validation/tuning of the four-finger touchpad gesture feed;
 - public D-Bus/IPC automation.
 
 Those are subsequent implementation milestones and must use the versioned contracts in `docs/` and `spec/`.
