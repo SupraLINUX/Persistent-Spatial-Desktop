@@ -200,6 +200,38 @@ Item {
     }
 
     Rectangle {
+        anchors.left: parent.left
+        anchors.top: parent.top
+        anchors.margins: 24
+        width: compositorStatus.implicitWidth + 24
+        height: 30
+        radius: 12
+        color: "#9911192D"
+        border.width: 1
+        border.color: DesignTokens.value("colors.border.unfocused")
+        z: 110
+
+        Text {
+            id: compositorStatus
+            anchors.centerIn: parent
+            text: {
+                if (!CompositorBridge.available)
+                    return "HYPRLAND · OFFLINE"
+
+                const stream = CompositorBridge.eventStreamConnected ? "LIVE" : "IPC"
+                return "HYPRLAND · " + stream
+                    + " · " + CompositorBridge.monitors.length + " MON"
+                    + " · " + CompositorBridge.windows.length + " WIN"
+            }
+            color: CompositorBridge.eventStreamConnected
+                ? DesignTokens.value("colors.text.secondary")
+                : DesignTokens.value("colors.text.muted")
+            font.pixelSize: 11
+            font.weight: Font.DemiBold
+        }
+    }
+
+    Rectangle {
         anchors.right: parent.right
         anchors.top: parent.top
         anchors.margins: 24
