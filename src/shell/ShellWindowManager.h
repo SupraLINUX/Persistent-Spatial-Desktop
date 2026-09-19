@@ -34,6 +34,7 @@ private:
         QPointer<QScreen> screen;
         QPointer<QQmlContext> context;
         QPointer<QQuickWindow> window;
+        QPointer<QQuickWindow> returnShield;
         QPointer<SpatialState> state;
         QPointer<SpatialLayout> layout;
         QPointer<SpatialMotionController> motion;
@@ -43,6 +44,8 @@ private:
     void createForScreen(QScreen *screen);
     void destroyForScreen(QScreen *screen);
     void configureLayerSurface(Instance *instance);
+    void configureReturnShield(Instance *instance);
+    void updateReturnShield(Instance *instance);
 
     QQmlApplicationEngine *m_engine = nullptr;
     DesignTokens *m_designTokens = nullptr;
