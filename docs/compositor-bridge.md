@@ -76,9 +76,12 @@ The current experimental protocol is monitor-scoped and advertises:
 - protocol version;
 - plugin version;
 - render-offset experiment support;
-- explicit monitor targeting.
+- explicit monitor targeting;
+- opt-in four-finger gesture events.
 
 Without this handshake, compositor motion sync remains disabled.
+
+The experimental plugin can emit `psdgesturebegin`, `psdgestureupdate`, and `psdgestureend` over Hyprland's existing event socket. The plugin does **not** intercept four-finger swipes merely because it is loaded: `plugin:psd:gesture-events 1` must be explicitly enabled. Three-finger gestures remain untouched.
 
 ## Phase 2: spatial transform
 
