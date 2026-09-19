@@ -74,6 +74,7 @@ int main(int argc, char *argv[])
     layerWindow->setExclusiveZone(-1);
     layerWindow->setKeyboardInteractivity(
         LayerShellQt::Window::KeyboardInteractivityOnDemand);
+    layerWindow->setActivateOnShow(false);
 
     compositorBridge.start();
     window->show();
