@@ -70,7 +70,9 @@ PSD Runtime (Qt 6 / C++ / QML)
 Desktop LEFT   RIGHT  TOP    DASH
 ```
 
-The compositor owns real application windows. The PSD shell owns spatial surfaces, desktop UI, shared shell state and system integration.
+The compositor owns real application windows. The PSD shell owns spatial surfaces, desktop UI, shared shell services and system integration.
+
+The runtime creates one independent layer-shell window per `QScreen`. Each monitor instance owns its own `SpatialState`, `SpatialLayout` and `SpatialMotionController`, while global services such as design tokens and compositor introspection remain shared. This preserves the product rule that navigating one monitor must not move the others.
 
 The spatial bridge must expose a coherent workspace/surface transform. Avoid implementing the effect by moving every application window independently if the compositor can expose a lower-level transformation.
 
