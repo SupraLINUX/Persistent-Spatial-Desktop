@@ -1,0 +1,119 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://supralinux.github.io/psd/spec/settings.schema.json",
+  "title": "PSD Settings",
+  "type": "object",
+  "properties": {
+    "navigation": {
+      "type": "object",
+      "properties": {
+        "edgeActivationEnabled": {
+          "type": "boolean",
+          "default": true
+        },
+        "edgeDelayMs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 2000,
+          "default": 180
+        },
+        "touchpadSpatialFingers": {
+          "type": "integer",
+          "minimum": 3,
+          "maximum": 5,
+          "default": 4
+        },
+        "touchpadWorkspaceFingers": {
+          "type": "integer",
+          "minimum": 3,
+          "maximum": 5,
+          "default": 3
+        },
+        "enabledEdges": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "left",
+              "right",
+              "top",
+              "dash"
+            ]
+          },
+          "uniqueItems": true,
+          "default": [
+            "left",
+            "right",
+            "top",
+            "dash"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "appearance": {
+      "type": "object",
+      "properties": {
+        "theme": {
+          "type": "string",
+          "default": "spatial-glass-dark"
+        },
+        "blurMode": {
+          "enum": [
+            "off",
+            "reduced",
+            "standard"
+          ],
+          "default": "standard"
+        },
+        "reduceMotion": {
+          "type": "boolean",
+          "default": false
+        },
+        "reduceTransparency": {
+          "type": "boolean",
+          "default": false
+        },
+        "highContrast": {
+          "type": "boolean",
+          "default": false
+        },
+        "textScale": {
+          "type": "number",
+          "minimum": 0.75,
+          "maximum": 2,
+          "default": 1
+        },
+        "animationSpeed": {
+          "type": "number",
+          "minimum": 0.25,
+          "maximum": 2,
+          "default": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "automation": {
+      "type": "object",
+      "properties": {
+        "defaultMode": {
+          "enum": [
+            "direct",
+            "visual",
+            "guided"
+          ],
+          "default": "direct"
+        },
+        "allowVisualChoreography": {
+          "type": "boolean",
+          "default": true
+        },
+        "allowGhostCursor": {
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}
