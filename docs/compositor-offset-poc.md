@@ -38,6 +38,7 @@ The plugin is intentionally opt-in because Hyprland plugins are ABI-sensitive.
 ```bash
 sudo apt install hyprland-dev pkgconf libgles-dev
 cmake -S . -B build-hypr -G Ninja \
+  -DPSD_BUILD_SHELL=OFF \
   -DPSD_BUILD_HYPRLAND_PLUGIN=ON \
   -DBUILD_TESTING=OFF
 cmake --build build-hypr --target psd-hyprland-plugin
