@@ -73,6 +73,31 @@ QPointF SpatialLayout::offsetForSurface(const QString &surface) const
     return {};
 }
 
+QMargins SpatialLayout::returnShieldMargins(const QString &surface) const
+{
+    const QString normalized = surface.trimmed().toLower();
+    const int width = std::max(0, qRound(m_viewportSize.width()));
+    const int height = std::max(0, qRound(m_viewportSize.height()));
+    const int gutterValue = std::max(0, qRound(m_gutter));
+
+    if (normalized == QStringLiteral("left"))
+        return {qRound(m_leftWidth), gutterValue, 0, gutterValue};
+
+    if (normalized == QStringLiteral("right"))
+        return {0, gutterValue, qRound(m_rightWidth), gutterValue};
+
+    if (normalized == QStringLiteral("top"))
+        return {gutterValue, qRound(m_topHeight), gutterValue, 0};
+
+    if (normalized == QStringLiteral("dash")) {
+        const int visibleCenter = std::min(height, gutterValue * 2);
+        return {gutterValue, 0, gutterValue, std::max(0, height - visibleCenter)};
+    }
+
+    Q_UNUSED(width);
+    return {};
+}
+
 void SpatialLayout::recompute()
 {
     const double smallerSide = std::min(m_viewportSize.width(), m_viewportSize.height());
