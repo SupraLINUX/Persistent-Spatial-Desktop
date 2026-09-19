@@ -38,15 +38,16 @@ Implemented in the bootstrap:
 
 - Qt application/runtime entry point;
 - canonical `spec/design-tokens.json` loaded as an embedded runtime resource;
-- shared C++ `SpatialState`;
-- QML CENTER / LEFT / RIGHT / TOP / DASH object structure;
-- rigid spatial translation;
+- independent C++ spatial state/layout/motion per monitor;
+- one Wayland layer-shell surface per connected monitor;
+- QML CENTER / LEFT / RIGHT / TOP / DASH object structure per monitor;
+- rigid spatial translation driven by one C++ animation authority;
 - ~180 ms mouse gutter dwell;
 - CENTER return semantics at shell level;
 - core unit tests;
 - Ubuntu 26.04 CI build environment.
 
-This is not yet a complete desktop session. Real compositor-owned application windows and Hyprland integration are subsequent milestones.
+This is not yet a complete desktop session. Hyprland state integration and an experimental compositor plugin now exist, but production movement/input validation for real compositor-owned application windows remains a subsequent milestone.
 
 See `docs/development.md` for build instructions and the exact current boundary.
 
