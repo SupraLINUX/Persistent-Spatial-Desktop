@@ -1,3 +1,4 @@
+#include "compositor/CompositorBridge.h"
 #include "compositor/HyprlandProtocol.h"
 #include "core/DesignTokens.h"
 #include "core/SpatialLayout.h"
@@ -7,6 +8,27 @@
 #include <QSignalSpy>
 #include <QVariantMap>
 #include <QtTest>
+
+
+class TestCompositorBridge final : public CompositorBridge
+{
+public:
+    using CompositorBridge::CompositorBridge;
+
+    QString backendName() const override
+    {
+        return QStringLiteral("test");
+    }
+
+    void start() override {}
+    void refreshAll() override {}
+
+    void inject(const QVariantList &monitors, const QVariantList &windows)
+    {
+        setMonitors(monitors);
+        setWindows(windows);
+    }
+};
 
 class CoreTest final : public QObject
 {
@@ -20,6 +42,7 @@ private slots:
     void spatialLayoutComputesResponsiveGeometry();
     void spatialLayoutComputesReturnShieldMargins();
     void spatialMotionUsesSingleAuthoritativeOffset();
+    void spatialMotionSnapToCenterIsImmediate();
     void spatialGestureTracksOneToOneProgress();
     void spatialGestureCommitsByDistance();
     void spatialGestureCommitsByVelocity();
@@ -30,6 +53,7 @@ private slots:
     void hyprlandMonitorParsing();
     void hyprlandWorkspaceParsing();
     void hyprlandWindowParsing();
+    void compositorFullscreenDetectionUsesActiveWorkspace();
 };
 
 void CoreTest::designTokensLoad()
@@ -133,6 +157,28 @@ void CoreTest::spatialMotionUsesSingleAuthoritativeOffset()
     QCOMPARE(motion.offset(), QPointF());
 }
 
+
+
+void CoreTest::spatialMotionSnapToCenterIsImmediate()
+{
+    SpatialState state;
+    SpatialLayout layout;
+    layout.setViewportSize(QSizeF(1280, 800));
+
+    SpatialMotionController motion(&state, &layout);
+    motion.setDurationMs(1000);
+
+    QVERIFY(motion.navigate(QStringLiteral("left")));
+    QVERIFY(motion.running());
+
+    motion.snapToCenter();
+
+    QVERIFY(!motion.running());
+    QVERIFY(!motion.gestureActive());
+    QCOMPARE(state.currentSurface(), QStringLiteral("center"));
+    QCOMPARE(motion.targetSurface(), QStringLiteral("center"));
+    QCOMPARE(motion.offset(), QPointF());
+}
 
 void CoreTest::spatialGestureTracksOneToOneProgress()
 {
@@ -355,6 +401,54 @@ void CoreTest::hyprlandWindowParsing()
     QCOMPARE(window.value(QStringLiteral("x")).toInt(), 100);
     QCOMPARE(window.value(QStringLiteral("height")).toInt(), 800);
     QVERIFY(window.value(QStringLiteral("floating")).toBool());
+}
+
+
+void CoreTest::compositorFullscreenDetectionUsesActiveWorkspace()
+{
+    TestCompositorBridge bridge;
+
+    const QVariantMap monitor{
+        {QStringLiteral("id"), 0},
+        {QStringLiteral("name"), QStringLiteral("DP-1")},
+        {QStringLiteral("activeWorkspace"), QVariantMap{
+            {QStringLiteral("id"), 3},
+            {QStringLiteral("name"), QStringLiteral("3")},
+        }},
+    };
+
+    QVariantMap window{
+        {QStringLiteral("mapped"), true},
+        {QStringLiteral("fullscreen"), 1},
+        {QStringLiteral("monitorId"), 0},
+        {QStringLiteral("workspace"), QVariantMap{
+            {QStringLiteral("id"), 3},
+            {QStringLiteral("name"), QStringLiteral("3")},
+        }},
+    };
+
+    bridge.inject(QVariantList{monitor}, QVariantList{window});
+    QVERIFY(bridge.monitorHasFullscreenWindow(QStringLiteral("DP-1")));
+
+    window.insert(
+        QStringLiteral("workspace"),
+        QVariantMap{{QStringLiteral("id"), 4}, {QStringLiteral("name"), QStringLiteral("4")}});
+    bridge.inject(QVariantList{monitor}, QVariantList{window});
+    QVERIFY(!bridge.monitorHasFullscreenWindow(QStringLiteral("DP-1")));
+
+    window.insert(
+        QStringLiteral("workspace"),
+        QVariantMap{{QStringLiteral("id"), 3}, {QStringLiteral("name"), QStringLiteral("3")}});
+    window.insert(QStringLiteral("mapped"), false);
+    bridge.inject(QVariantList{monitor}, QVariantList{window});
+    QVERIFY(!bridge.monitorHasFullscreenWindow(QStringLiteral("DP-1")));
+
+    window.insert(QStringLiteral("mapped"), true);
+    window.insert(QStringLiteral("fullscreen"), 0);
+    bridge.inject(QVariantList{monitor}, QVariantList{window});
+    QVERIFY(!bridge.monitorHasFullscreenWindow(QStringLiteral("DP-1")));
+
+    QVERIFY(!bridge.monitorHasFullscreenWindow(QStringLiteral("HDMI-A-1")));
 }
 
 QTEST_GUILESS_MAIN(CoreTest)
