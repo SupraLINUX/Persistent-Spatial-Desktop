@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://supralinux.github.io/psd/spec/shell.schema.json",
+  "title": "PSD Shell Model",
+  "type": "object",
+  "required": [
+    "specVersion",
+    "surfaces"
+  ],
+  "properties": {
+    "specVersion": {
+      "type": "string",
+      "const": "0.1.0"
+    },
+    "surfaces": {
+      "type": "object",
+      "required": [
+        "center",
+        "left",
+        "right",
+        "top",
+        "dash"
+      ],
+      "properties": {
+        "center": {
+          "$ref": "#/$defs/surface"
+        },
+        "left": {
+          "$ref": "#/$defs/surface"
+        },
+        "right": {
+          "$ref": "#/$defs/surface"
+        },
+        "top": {
+          "$ref": "#/$defs/surface"
+        },
+        "dash": {
+          "$ref": "#/$defs/surface"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "$defs": {
+    "surface": {
+      "type": "object",
+      "required": [
+        "id",
+        "persistent"
+      ],
+      "properties": {
+        "id": {
+          "enum": [
+            "center",
+            "left",
+            "right",
+            "top",
+            "dash"
+          ]
+        },
+        "persistent": {
+          "type": "boolean"
+        },
+        "provider": {
+          "type": "string"
+        },
+        "enabled": {
+          "type": "boolean",
+          "default": true
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}
