@@ -1,0 +1,70 @@
+cmake_minimum_required(VERSION 3.25)
+
+project(PersistentSpatialDesktop
+    VERSION 0.1.0
+    DESCRIPTION "Persistent Spatial Desktop shell"
+    LANGUAGES CXX
+)
+
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
+include(CTest)
+
+find_package(Qt6 6.10 REQUIRED COMPONENTS Core Gui Qml Quick)
+qt_standard_project_setup(REQUIRES 6.10)
+
+add_library(psd-core STATIC
+    src/core/DesignTokens.cpp
+    src/core/DesignTokens.h
+    src/core/SpatialState.cpp
+    src/core/SpatialState.h
+)
+
+target_include_directories(psd-core
+    PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+
+target_link_libraries(psd-core
+    PUBLIC
+        Qt6::Core
+)
+
+qt_add_executable(psd-shell
+    src/main.cpp
+)
+
+target_link_libraries(psd-shell
+    PRIVATE
+        psd-core
+        Qt6::Core
+        Qt6::Gui
+        Qt6::Qml
+        Qt6::Quick
+)
+
+qt_add_resources(psd-shell "psd_shell_resources"
+    PREFIX "/"
+    FILES
+        qml/Main.qml
+        qml/SpatialRoot.qml
+        qml/Surfaces/SurfaceBase.qml
+        qml/Surfaces/CenterSurface.qml
+        qml/Surfaces/LeftSurface.qml
+        qml/Surfaces/RightSurface.qml
+        qml/Surfaces/TopSurface.qml
+        qml/Surfaces/DashSurface.qml
+        spec/design-tokens.json
+)
+
+install(TARGETS psd-shell
+    RUNTIME DESTINATION bin
+)
+
+if(BUILD_TESTING)
+    find_package(Qt6 6.10 REQUIRED COMPONENTS Test)
+    add_subdirectory(tests)
+endif()
