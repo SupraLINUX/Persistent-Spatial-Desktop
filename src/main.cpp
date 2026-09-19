@@ -1,3 +1,4 @@
+#include "compositor/HyprlandIpcBridge.h"
 #include "core/DesignTokens.h"
 #include "core/SpatialState.h"
 
@@ -23,16 +24,20 @@ int main(int argc, char *argv[])
     }
 
     SpatialState spatialState;
+    HyprlandIpcBridge compositorBridge;
 
     QQmlApplicationEngine engine;
     engine.rootContext()->setContextProperty(QStringLiteral("DesignTokens"), &designTokens);
     engine.rootContext()->setContextProperty(QStringLiteral("SpatialState"), &spatialState);
+    engine.rootContext()->setContextProperty(QStringLiteral("CompositorBridge"), &compositorBridge);
 
     engine.load(QUrl(QStringLiteral("qrc:/qml/Main.qml")));
     if (engine.rootObjects().isEmpty()) {
         qCritical() << "PSD failed to create the QML root object";
         return EXIT_FAILURE;
     }
+
+    compositorBridge.start();
 
     return application.exec();
 }
