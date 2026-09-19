@@ -27,7 +27,7 @@ public:
 
 signals:
     void instanceSignatureChanged();
-    void experimentalSpatialCommandFinished(bool success, const QString &message);
+    void experimentalSpatialCommandFinished(const QString &monitorName, bool success, const QString &message);
 
 private:
     enum RefreshFlag : quint8 {
