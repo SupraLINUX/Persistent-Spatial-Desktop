@@ -63,9 +63,6 @@ SDispatchResult workspaceForMonitor(
     if (workspace->m_isSpecialWorkspace)
         return {.success = false, .error = "PSD: special workspaces are excluded from the offset experiment"};
 
-    if (workspace->m_hasFullscreenWindow)
-        return {.success = false, .error = "PSD: refusing render offset while the workspace contains fullscreen content"};
-
     return {};
 }
 
@@ -86,6 +83,9 @@ SDispatchResult setOffset(std::string arguments)
     PHLWORKSPACE workspace;
     if (const auto result = workspaceForMonitor(monitorName, monitor, workspace); !result.success)
         return result;
+
+    if (workspace->m_hasFullscreenWindow)
+        return {.success = false, .error = "PSD: refusing non-zero render offset while the workspace contains fullscreen content"};
 
     applyOffset(workspace, monitor, Vector2D{x, y});
     return {};
