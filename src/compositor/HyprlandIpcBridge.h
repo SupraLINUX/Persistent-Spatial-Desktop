@@ -22,8 +22,8 @@ public:
     void start() override;
     Q_INVOKABLE void refreshAll() override;
     Q_INVOKABLE void refreshCapabilities();
-    Q_INVOKABLE void setExperimentalSpatialOffset(double x, double y);
-    Q_INVOKABLE void resetExperimentalSpatialOffset();
+    Q_INVOKABLE void setExperimentalSpatialOffset(const QString &monitorName, double x, double y);
+    Q_INVOKABLE void resetExperimentalSpatialOffset(const QString &monitorName);
 
 signals:
     void instanceSignatureChanged();
