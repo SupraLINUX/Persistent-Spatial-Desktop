@@ -60,6 +60,11 @@ ShellWindowManager::ShellWindowManager(
 
         instance->motion->endGesture(velocityX, velocityY, cancelled);
     });
+
+    connect(m_compositorBridge, &CompositorBridge::monitorsChanged,
+            this, &ShellWindowManager::updateAllFullscreenStates);
+    connect(m_compositorBridge, &CompositorBridge::windowsChanged,
+            this, &ShellWindowManager::updateAllFullscreenStates);
 }
 
 void ShellWindowManager::start()
@@ -158,7 +163,7 @@ void ShellWindowManager::createForScreen(QScreen *screen)
             this, [this, instance] { updateReturnShield(instance); });
 
     m_instances.insert(screen, instance);
-    instance->window->show();
+    updateFullscreenState(instance);
     updateReturnShield(instance);
 }
 
@@ -250,6 +255,11 @@ void ShellWindowManager::updateReturnShield(Instance *instance)
     if (!layerWindow)
         return;
 
+    if (instance->fullscreenSuppressed) {
+        instance->returnShield->hide();
+        return;
+    }
+
     if (instance->motion->running()) {
         layerWindow->setMargins(QMargins{});
         if (!instance->returnShield->isVisible())
@@ -287,4 +297,39 @@ ShellWindowManager::Instance *ShellWindowManager::instanceForMonitorName(const Q
     }
 
     return nullptr;
+}
+
+void ShellWindowManager::updateFullscreenState(Instance *instance)
+{
+    if (!instance || !instance->screen || !instance->window
+        || !instance->returnShield || !instance->motion)
+        return;
+
+    const bool fullscreen =
+        m_compositorBridge->monitorHasFullscreenWindow(instance->screen->name());
+
+    if (instance->fullscreenStateInitialized
+        && instance->fullscreenSuppressed == fullscreen)
+        return;
+
+    instance->fullscreenStateInitialized = true;
+    instance->fullscreenSuppressed = fullscreen;
+
+    if (fullscreen) {
+        instance->returnShield->hide();
+        instance->motion->snapToCenter();
+        instance->window->hide();
+        return;
+    }
+
+    if (!instance->window->isVisible())
+        instance->window->show();
+
+    updateReturnShield(instance);
+}
+
+void ShellWindowManager::updateAllFullscreenStates()
+{
+    for (Instance *instance : m_instances)
+        updateFullscreenState(instance);
 }
