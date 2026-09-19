@@ -16,6 +16,7 @@ include(CTest)
 option(PSD_BUILD_HYPRLAND_PLUGIN "Build the experimental Hyprland compositor plugin" OFF)
 
 find_package(Qt6 6.10 REQUIRED COMPONENTS Core Gui Network Qml Quick)
+find_package(LayerShellQt REQUIRED)
 qt_standard_project_setup(REQUIRES 6.10)
 
 add_library(psd-core STATIC
@@ -57,6 +58,7 @@ target_link_libraries(psd-shell
         Qt6::Gui
         Qt6::Qml
         Qt6::Quick
+        LayerShellQt::Interface
 )
 
 qt_add_resources(psd-shell "psd_shell_resources"
