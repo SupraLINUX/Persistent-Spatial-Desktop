@@ -69,7 +69,9 @@ It then connects to Hyprland's documented command and event UNIX sockets.
 - embedded canonical Spatial Glass design-token loading;
 - shared C++ spatial state;
 - shared C++ spatial geometry and animation authority;
-- Wayland `wlr-layer-shell` surface through LayerShellQt;
+- one Wayland `wlr-layer-shell` surface per connected `QScreen` through LayerShellQt;
+- independent spatial state/layout/motion per monitor;
+- live screen add/remove handling;
 - QML shell root;
 - persistent CENTER/LEFT/RIGHT/TOP/DASH object structure;
 - mouse gutter dwell navigation;
@@ -81,7 +83,7 @@ It then connects to Hyprland's documented command and event UNIX sockets.
 - live event socket;
 - event-coalesced state refreshes;
 - no compositor polling loop;
-- unit tests for tokens, spatial state and Hyprland protocol parsing.
+- unit tests for tokens, spatial state, responsive geometry, motion authority and Hyprland protocol parsing.
 
 ## Current compositor boundary
 
