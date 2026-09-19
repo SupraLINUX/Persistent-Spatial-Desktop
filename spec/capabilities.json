@@ -1,0 +1,32 @@
+{
+  "specVersion": "0.1.0",
+  "capabilities": [
+    "desktop",
+    "wallpaper",
+    "desktop-icons",
+    "windows",
+    "workspaces",
+    "spatial-navigation",
+    "apps",
+    "search",
+    "notifications",
+    "settings",
+    "media",
+    "control",
+    "automation",
+    "plugins",
+    "accessibility"
+  ],
+  "spatialDestinations": [
+    "center",
+    "left",
+    "right",
+    "top",
+    "dash"
+  ],
+  "automationModes": [
+    "direct",
+    "visual",
+    "guided"
+  ]
+}
