@@ -29,6 +29,7 @@ public:
     [[nodiscard]] QVariantList monitors() const;
     [[nodiscard]] QVariantList workspaces() const;
     [[nodiscard]] QVariantList windows() const;
+    Q_INVOKABLE [[nodiscard]] bool monitorHasFullscreenWindow(const QString &monitorName) const;
 
     virtual void start() = 0;
     Q_INVOKABLE virtual void refreshAll() = 0;
