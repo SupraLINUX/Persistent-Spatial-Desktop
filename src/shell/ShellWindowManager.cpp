@@ -13,9 +13,12 @@
 #include <QQmlApplicationEngine>
 #include <QQmlComponent>
 #include <QQmlContext>
+#include <QMargins>
 #include <QQuickWindow>
 #include <QScreen>
 #include <QUrl>
+
+#include <cmath>
 
 ShellWindowManager::ShellWindowManager(
     QQmlApplicationEngine *engine,
@@ -94,8 +97,40 @@ void ShellWindowManager::createForScreen(QScreen *screen)
     instance->window->setScreen(screen);
     configureLayerSurface(instance);
 
+    QQmlComponent shieldComponent(m_engine, QUrl(QStringLiteral("qrc:/qml/ReturnShield.qml")));
+    if (shieldComponent.status() != QQmlComponent::Ready) {
+        qCritical().noquote() << "PSD failed to load return shield for" << screen->name()
+                              << shieldComponent.errorString();
+        instance->window->deleteLater();
+        delete instance;
+        return;
+    }
+
+    QObject *shieldObject = shieldComponent.create(instance->context);
+    instance->returnShield = qobject_cast<QQuickWindow *>(shieldObject);
+    if (!instance->returnShield) {
+        qCritical().noquote() << "PSD return shield root is not a QQuickWindow for" << screen->name();
+        delete shieldObject;
+        instance->window->deleteLater();
+        delete instance;
+        return;
+    }
+
+    instance->returnShield->setScreen(screen);
+    configureReturnShield(instance);
+
+    connect(instance->motion, &SpatialMotionController::transitionStarted,
+            this, [this, instance](const QString &) { updateReturnShield(instance); });
+    connect(instance->motion, &SpatialMotionController::transitionFinished,
+            this, [this, instance](const QString &) { updateReturnShield(instance); });
+    connect(instance->state, &SpatialState::currentSurfaceChanged,
+            this, [this, instance] { updateReturnShield(instance); });
+    connect(instance->layout, &SpatialLayout::geometryChanged,
+            this, [this, instance] { updateReturnShield(instance); });
+
     m_instances.insert(screen, instance);
     instance->window->show();
+    updateReturnShield(instance);
 }
 
 void ShellWindowManager::destroyForScreen(QScreen *screen)
@@ -103,6 +138,11 @@ void ShellWindowManager::destroyForScreen(QScreen *screen)
     Instance *instance = m_instances.take(screen);
     if (!instance)
         return;
+
+    if (instance->returnShield) {
+        instance->returnShield->close();
+        instance->returnShield->deleteLater();
+    }
 
     if (instance->window) {
         instance->window->close();
@@ -145,4 +185,83 @@ void ShellWindowManager::configureLayerSurface(Instance *instance)
     layerWindow->setKeyboardInteractivity(
         LayerShellQt::Window::KeyboardInteractivityOnDemand);
     layerWindow->setActivateOnShow(false);
+}
+
+void ShellWindowManager::configureReturnShield(Instance *instance)
+{
+    auto *layerWindow = LayerShellQt::Window::get(instance->returnShield);
+    if (!layerWindow) {
+        qCritical().noquote() << "PSD failed to create return shield layer surface for"
+                              << instance->screen->name();
+        return;
+    }
+
+    layerWindow->setScope(QStringLiteral("psd-return-shield:%1").arg(instance->screen->name()));
+    layerWindow->setScreen(instance->screen);
+    layerWindow->setLayer(LayerShellQt::Window::LayerTop);
+
+    LayerShellQt::Window::Anchors anchors;
+    anchors |= LayerShellQt::Window::AnchorTop;
+    anchors |= LayerShellQt::Window::AnchorBottom;
+    anchors |= LayerShellQt::Window::AnchorLeft;
+    anchors |= LayerShellQt::Window::AnchorRight;
+    layerWindow->setAnchors(anchors);
+    layerWindow->setExclusiveZone(-1);
+    layerWindow->setKeyboardInteractivity(
+        LayerShellQt::Window::KeyboardInteractivityNone);
+    layerWindow->setActivateOnShow(false);
+}
+
+void ShellWindowManager::updateReturnShield(Instance *instance)
+{
+    if (!instance || !instance->returnShield || !instance->layout || !instance->motion || !instance->state)
+        return;
+
+    auto *layerWindow = LayerShellQt::Window::get(instance->returnShield);
+    if (!layerWindow)
+        return;
+
+    if (instance->motion->running()) {
+        layerWindow->setMargins({});
+        if (!instance->returnShield->isVisible())
+            instance->returnShield->show();
+        return;
+    }
+
+    const QString surface = instance->state->currentSurface();
+    if (surface == QStringLiteral("center")) {
+        instance->returnShield->hide();
+        return;
+    }
+
+    const QSizeF viewport = instance->layout->viewportSize();
+    const int width = std::max(0, qRound(viewport.width()));
+    const int height = std::max(0, qRound(viewport.height()));
+    const int gutter = std::max(0, qRound(instance->layout->gutter()));
+
+    QMargins margins;
+
+    if (surface == QStringLiteral("left")) {
+        margins = QMargins(qRound(instance->layout->leftWidth()), gutter, 0, gutter);
+    } else if (surface == QStringLiteral("right")) {
+        margins = QMargins(0, gutter, qRound(instance->layout->rightWidth()), gutter);
+    } else if (surface == QStringLiteral("top")) {
+        margins = QMargins(gutter, qRound(instance->layout->topHeight()), gutter, 0);
+    } else if (surface == QStringLiteral("dash")) {
+        const int visibleCenter = std::min(height, gutter * 2);
+        margins = QMargins(gutter, 0, gutter, std::max(0, height - visibleCenter));
+    } else {
+        instance->returnShield->hide();
+        return;
+    }
+
+    if (width <= margins.left() + margins.right()
+        || height <= margins.top() + margins.bottom()) {
+        instance->returnShield->hide();
+        return;
+    }
+
+    layerWindow->setMargins(margins);
+    if (!instance->returnShield->isVisible())
+        instance->returnShield->show();
 }
