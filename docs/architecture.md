@@ -21,11 +21,14 @@ Development baseline:
 - Ubuntu 26.04;
 - Qt 6;
 - Qt Quick/QML;
+- LayerShellQt as the narrow Qt adapter for the Wayland `wlr-layer-shell` protocol;
 - PSD-owned runtime;
 - C++ for deep Qt/system/compositor integration where justified;
 - Hyprland as the initial compositor base.
 
 Quickshell is a useful implementation reference, not a required architectural dependency.
+
+LayerShellQt is accepted only as a small protocol adapter. PSD still owns its runtime, QML tree, state, APIs and compositor integration. Using the packaged adapter avoids embedding QtWayland private API code in PSD.
 
 Hyprland may be reconsidered only if real implementation work demonstrates a concrete blocker.
 
