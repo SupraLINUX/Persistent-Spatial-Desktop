@@ -23,6 +23,10 @@ add_library(psd-core STATIC
     src/core/DesignTokens.h
     src/core/SpatialState.cpp
     src/core/SpatialState.h
+    src/core/SpatialLayout.cpp
+    src/core/SpatialLayout.h
+    src/core/SpatialMotionController.cpp
+    src/core/SpatialMotionController.h
     src/compositor/CompositorBridge.cpp
     src/compositor/CompositorBridge.h
     src/compositor/HyprlandIpcBridge.cpp
