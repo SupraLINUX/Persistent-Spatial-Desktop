@@ -4,21 +4,19 @@ import "Surfaces"
 Item {
     id: root
 
-    property real gutter: Math.max(12, Math.min(18, Math.min(width, height) * 0.012))
-    property real leftWidth: Math.max(320, Math.min(460, width * 0.24))
-    property real rightWidth: Math.max(340, Math.min(500, width * 0.26))
-    property real topHeight: Math.max(220, Math.min(320, height * 0.25))
-    property real centerWidth: width - (gutter * 2)
-    property real centerHeight: height - (gutter * 2)
-    property int spatialDuration: tokenNumber("motion.durationMs.spatial", 500)
+    property real gutter: SpatialLayout.gutter
+    property real leftWidth: SpatialLayout.leftWidth
+    property real rightWidth: SpatialLayout.rightWidth
+    property real topHeight: SpatialLayout.topHeight
+    property real centerWidth: SpatialLayout.centerWidth
+    property real centerHeight: SpatialLayout.centerHeight
 
-    function tokenNumber(path, fallbackValue) {
-        const value = DesignTokens.value(path)
-        return value === undefined || value === null ? fallbackValue : Number(value)
+    function syncViewport() {
+        SpatialLayout.viewportSize = Qt.size(width, height)
     }
 
     function armEdge(destination) {
-        if (SpatialState.currentSurface !== "center")
+        if (SpatialState.currentSurface !== "center" || SpatialMotion.running)
             return
 
         edgeTimer.destination = destination
@@ -30,21 +28,9 @@ Item {
             edgeTimer.stop()
     }
 
-    property real worldX: {
-        switch (SpatialState.currentSurface) {
-        case "left": return leftWidth - gutter
-        case "right": return -(rightWidth - gutter)
-        default: return 0
-        }
-    }
-
-    property real worldY: {
-        switch (SpatialState.currentSurface) {
-        case "top": return topHeight - gutter
-        case "dash": return -(height - (gutter * 3))
-        default: return 0
-        }
-    }
+    Component.onCompleted: syncViewport()
+    onWidthChanged: syncViewport()
+    onHeightChanged: syncViewport()
 
     Rectangle {
         anchors.fill: parent
@@ -75,24 +61,8 @@ Item {
         id: world
         width: root.width
         height: root.height
-        x: root.worldX
-        y: root.worldY
-
-        Behavior on x {
-            NumberAnimation {
-                duration: root.spatialDuration
-                easing.type: Easing.BezierSpline
-                easing.bezierCurve: [0.22, 0.85, 0.26, 1.0, 1.0, 1.0]
-            }
-        }
-
-        Behavior on y {
-            NumberAnimation {
-                duration: root.spatialDuration
-                easing.type: Easing.BezierSpline
-                easing.bezierCurve: [0.22, 0.85, 0.26, 1.0, 1.0, 1.0]
-            }
-        }
+        x: SpatialMotion.offsetX
+        y: SpatialMotion.offsetY
 
         LeftSurface {
             x: -(root.leftWidth - root.gutter)
@@ -127,8 +97,8 @@ Item {
             y: root.gutter
             width: root.centerWidth
             height: root.centerHeight
-            returnEnabled: SpatialState.currentSurface !== "center"
-            onRequestCenter: SpatialState.center()
+            returnEnabled: SpatialState.currentSurface !== "center" && !SpatialMotion.running
+            onRequestCenter: SpatialMotion.center()
         }
     }
 
@@ -138,8 +108,8 @@ Item {
         interval: 180
         repeat: false
         onTriggered: {
-            if (SpatialState.currentSurface === "center")
-                SpatialState.navigate(destination)
+            if (SpatialState.currentSurface === "center" && !SpatialMotion.running)
+                SpatialMotion.navigate(destination)
         }
     }
 
@@ -152,7 +122,7 @@ Item {
         width: root.gutter
         z: 100
         hoverEnabled: true
-        enabled: SpatialState.currentSurface === "center"
+        enabled: SpatialState.currentSurface === "center" && !SpatialMotion.running
         onEntered: root.armEdge("left")
         onExited: root.disarmEdge("left")
     }
@@ -166,7 +136,7 @@ Item {
         width: root.gutter
         z: 100
         hoverEnabled: true
-        enabled: SpatialState.currentSurface === "center"
+        enabled: SpatialState.currentSurface === "center" && !SpatialMotion.running
         onEntered: root.armEdge("right")
         onExited: root.disarmEdge("right")
     }
@@ -180,7 +150,7 @@ Item {
         height: root.gutter
         z: 100
         hoverEnabled: true
-        enabled: SpatialState.currentSurface === "center"
+        enabled: SpatialState.currentSurface === "center" && !SpatialMotion.running
         onEntered: root.armEdge("top")
         onExited: root.disarmEdge("top")
     }
@@ -194,7 +164,7 @@ Item {
         height: root.gutter
         z: 100
         hoverEnabled: true
-        enabled: SpatialState.currentSurface === "center"
+        enabled: SpatialState.currentSurface === "center" && !SpatialMotion.running
         onEntered: root.armEdge("dash")
         onExited: root.disarmEdge("dash")
     }
@@ -219,9 +189,11 @@ Item {
                     return "HYPRLAND · OFFLINE"
 
                 const stream = CompositorBridge.eventStreamConnected ? "LIVE" : "IPC"
+                const plugin = CompositorBridge.capabilities.spatialRenderOffsetExperimental ? " · PSD PLUGIN" : ""
                 return "HYPRLAND · " + stream
                     + " · " + CompositorBridge.monitors.length + " MON"
                     + " · " + CompositorBridge.windows.length + " WIN"
+                    + plugin
             }
             color: CompositorBridge.eventStreamConnected
                 ? DesignTokens.value("colors.text.secondary")
@@ -246,7 +218,7 @@ Item {
         Text {
             id: statusText
             anchors.centerIn: parent
-            text: SpatialState.currentSurface.toUpperCase()
+            text: (SpatialMotion.running ? SpatialMotion.targetSurface : SpatialState.currentSurface).toUpperCase()
             color: DesignTokens.value("colors.text.secondary")
             font.pixelSize: 11
             font.weight: Font.DemiBold
