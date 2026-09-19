@@ -79,6 +79,7 @@ It then connects to Hyprland's documented command and event UNIX sockets.
 - rigid translation between shell surfaces driven by a single C++ motion controller;
 - CENTER return semantics;
 - per-monitor transparent return shield preventing displaced apps from receiving the first click;
+- per-monitor explicit-fullscreen suppression: immediate CENTER reset plus shell/shield unmap until fullscreen exits;
 - generic internal compositor bridge abstraction;
 - Hyprland IPC state backend;
 - monitor/workspace/window normalization;
