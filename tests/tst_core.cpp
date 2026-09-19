@@ -20,6 +20,10 @@ private slots:
     void spatialLayoutComputesResponsiveGeometry();
     void spatialLayoutComputesReturnShieldMargins();
     void spatialMotionUsesSingleAuthoritativeOffset();
+    void spatialGestureTracksOneToOneProgress();
+    void spatialGestureCommitsByDistance();
+    void spatialGestureCommitsByVelocity();
+    void spatialGestureCancelsExplicitly();
     void hyprlandSocketPaths();
     void hyprlandEventParsing();
     void hyprlandMonitorParsing();
@@ -124,6 +128,90 @@ void CoreTest::spatialMotionUsesSingleAuthoritativeOffset()
 
     motion.center();
     QTRY_COMPARE_WITH_TIMEOUT(finishedSpy.count(), 2, 100);
+    QCOMPARE(state.currentSurface(), QStringLiteral("center"));
+    QCOMPARE(motion.offset(), QPointF());
+}
+
+
+void CoreTest::spatialGestureTracksOneToOneProgress()
+{
+    SpatialState state;
+    SpatialLayout layout;
+    layout.setViewportSize(QSizeF(1280, 800));
+
+    SpatialMotionController motion(&state, &layout);
+    const QPointF destination = layout.offsetForSurface(QStringLiteral("left"));
+
+    QVERIFY(motion.beginGesture());
+    QVERIFY(motion.gestureActive());
+    QVERIFY(motion.updateGesture(destination.x() * 0.5, 1.0));
+
+    QCOMPARE(motion.targetSurface(), QStringLiteral("left"));
+    QVERIFY(qAbs(motion.gestureProgress() - 0.5) < 0.0001);
+    QVERIFY(qAbs(motion.offsetX() - (destination.x() * 0.5)) < 0.0001);
+    QCOMPARE(motion.offsetY(), 0.0);
+}
+
+void CoreTest::spatialGestureCommitsByDistance()
+{
+    SpatialState state;
+    SpatialLayout layout;
+    layout.setViewportSize(QSizeF(1280, 800));
+
+    SpatialMotionController motion(&state, &layout);
+    motion.setDurationMs(1);
+    const QPointF destination = layout.offsetForSurface(QStringLiteral("top"));
+
+    QSignalSpy finishedSpy(&motion, &SpatialMotionController::transitionFinished);
+
+    QVERIFY(motion.beginGesture());
+    QVERIFY(motion.updateGesture(0.0, destination.y() * 0.6));
+    QVERIFY(motion.endGesture(0.0, 0.0));
+
+    QTRY_COMPARE_WITH_TIMEOUT(finishedSpy.count(), 1, 100);
+    QCOMPARE(state.currentSurface(), QStringLiteral("top"));
+    QCOMPARE(motion.offset(), destination);
+}
+
+void CoreTest::spatialGestureCommitsByVelocity()
+{
+    SpatialState state;
+    SpatialLayout layout;
+    layout.setViewportSize(QSizeF(1280, 800));
+
+    SpatialMotionController motion(&state, &layout);
+    motion.setDurationMs(1);
+    const QPointF destination = layout.offsetForSurface(QStringLiteral("right"));
+
+    QSignalSpy finishedSpy(&motion, &SpatialMotionController::transitionFinished);
+
+    QVERIFY(motion.beginGesture());
+    QVERIFY(motion.updateGesture(destination.x() * 0.1, 0.0));
+    QVERIFY(motion.gestureProgress() < 0.45);
+    QVERIFY(motion.endGesture(destination.x() * 1.2, 0.0));
+
+    QTRY_COMPARE_WITH_TIMEOUT(finishedSpy.count(), 1, 100);
+    QCOMPARE(state.currentSurface(), QStringLiteral("right"));
+    QCOMPARE(motion.offset(), destination);
+}
+
+void CoreTest::spatialGestureCancelsExplicitly()
+{
+    SpatialState state;
+    SpatialLayout layout;
+    layout.setViewportSize(QSizeF(1280, 800));
+
+    SpatialMotionController motion(&state, &layout);
+    motion.setDurationMs(1);
+    const QPointF destination = layout.offsetForSurface(QStringLiteral("dash"));
+
+    QSignalSpy finishedSpy(&motion, &SpatialMotionController::transitionFinished);
+
+    QVERIFY(motion.beginGesture());
+    QVERIFY(motion.updateGesture(0.0, destination.y() * 0.8));
+    QVERIFY(motion.endGesture(0.0, destination.y() * 2.0, true));
+
+    QTRY_COMPARE_WITH_TIMEOUT(finishedSpy.count(), 1, 100);
     QCOMPARE(state.currentSurface(), QStringLiteral("center"));
     QCOMPARE(motion.offset(), QPointF());
 }
