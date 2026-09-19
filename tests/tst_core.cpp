@@ -26,6 +26,7 @@ private slots:
     void spatialGestureCancelsExplicitly();
     void hyprlandSocketPaths();
     void hyprlandEventParsing();
+    void hyprlandSpatialGestureParsing();
     void hyprlandMonitorParsing();
     void hyprlandWorkspaceParsing();
     void hyprlandWindowParsing();
@@ -236,6 +237,35 @@ void CoreTest::hyprlandEventParsing()
     QCOMPARE(event.payload, QStringLiteral("0xabc,1,org.example.App,Example"));
 
     QVERIFY(!HyprlandProtocol::parseEventLine(QByteArrayLiteral("invalid")).valid);
+}
+
+
+void CoreTest::hyprlandSpatialGestureParsing()
+{
+    const auto begin = HyprlandProtocol::parseSpatialGestureBegin(
+        QStringLiteral("DP-1,1200"));
+    QVERIFY(begin.valid);
+    QCOMPARE(begin.monitorName, QStringLiteral("DP-1"));
+    QCOMPARE(begin.timeMs, quint32(1200));
+
+    const auto update = HyprlandProtocol::parseSpatialGestureUpdate(
+        QStringLiteral("DP-1,12.5,-7.25,1216"));
+    QVERIFY(update.valid);
+    QCOMPARE(update.monitorName, QStringLiteral("DP-1"));
+    QCOMPARE(update.deltaX, 12.5);
+    QCOMPARE(update.deltaY, -7.25);
+    QCOMPARE(update.timeMs, quint32(1216));
+
+    const auto end = HyprlandProtocol::parseSpatialGestureEnd(
+        QStringLiteral("DP-1,1,1232"));
+    QVERIFY(end.valid);
+    QCOMPARE(end.monitorName, QStringLiteral("DP-1"));
+    QVERIFY(end.cancelled);
+    QCOMPARE(end.timeMs, quint32(1232));
+
+    QVERIFY(!HyprlandProtocol::parseSpatialGestureBegin(QStringLiteral("broken")).valid);
+    QVERIFY(!HyprlandProtocol::parseSpatialGestureUpdate(QStringLiteral("DP-1,x,1,2")).valid);
+    QVERIFY(!HyprlandProtocol::parseSpatialGestureEnd(QStringLiteral("DP-1,2,3")).valid);
 }
 
 void CoreTest::hyprlandMonitorParsing()
