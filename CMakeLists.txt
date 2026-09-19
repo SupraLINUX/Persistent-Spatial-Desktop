@@ -34,6 +34,8 @@ add_library(psd-core STATIC
     src/compositor/HyprlandIpcBridge.h
     src/compositor/HyprlandProtocol.cpp
     src/compositor/HyprlandProtocol.h
+    src/compositor/SpatialCompositorSync.cpp
+    src/compositor/SpatialCompositorSync.h
     src/shell/ShellWindowManager.cpp
     src/shell/ShellWindowManager.h
 )
