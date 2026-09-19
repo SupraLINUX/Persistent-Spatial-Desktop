@@ -84,6 +84,8 @@ Without this handshake, compositor motion sync remains disabled.
 
 The public IPC state bridge is not expected to be sufficient for the defining PSD operation: transforming CENTER and compositor-owned windows as one coherent spatial unit.
 
+The runtime-side gesture contract now exists independently of Hyprland. `SpatialMotionController` accepts logical-unit begin/update/end input, tracks translation 1:1, locks to a spatial axis, and settles by distance or release velocity. The compositor backend is responsible only for feeding correctly scaled global gesture deltas and release velocity.
+
 That phase should use the narrowest compositor-side integration capable of:
 
 - monitor-scoped spatial progress;
