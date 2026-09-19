@@ -33,9 +33,9 @@ ShellWindowManager::ShellWindowManager(
 
 void ShellWindowManager::start()
 {
-    connect(qApp, &QGuiApplication::screenAdded,
+    connect(qGuiApp, &QGuiApplication::screenAdded,
             this, &ShellWindowManager::createForScreen);
-    connect(qApp, &QGuiApplication::screenRemoved,
+    connect(qGuiApp, &QGuiApplication::screenRemoved,
             this, &ShellWindowManager::destroyForScreen);
 
     for (QScreen *screen : QGuiApplication::screens())
