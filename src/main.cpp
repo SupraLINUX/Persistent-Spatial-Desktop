@@ -1,5 +1,7 @@
 #include "compositor/HyprlandIpcBridge.h"
 #include "core/DesignTokens.h"
+#include "core/SpatialLayout.h"
+#include "core/SpatialMotionController.h"
 #include "core/SpatialState.h"
 
 #include <QCoreApplication>
@@ -24,11 +26,18 @@ int main(int argc, char *argv[])
     }
 
     SpatialState spatialState;
+    SpatialLayout spatialLayout;
+    SpatialMotionController spatialMotion(&spatialState, &spatialLayout);
+    spatialMotion.setDurationMs(
+        designTokens.value(QStringLiteral("motion.durationMs.spatial")).toInt());
+
     HyprlandIpcBridge compositorBridge;
 
     QQmlApplicationEngine engine;
     engine.rootContext()->setContextProperty(QStringLiteral("DesignTokens"), &designTokens);
     engine.rootContext()->setContextProperty(QStringLiteral("SpatialState"), &spatialState);
+    engine.rootContext()->setContextProperty(QStringLiteral("SpatialLayout"), &spatialLayout);
+    engine.rootContext()->setContextProperty(QStringLiteral("SpatialMotion"), &spatialMotion);
     engine.rootContext()->setContextProperty(QStringLiteral("CompositorBridge"), &compositorBridge);
 
     engine.load(QUrl(QStringLiteral("qrc:/qml/Main.qml")));
