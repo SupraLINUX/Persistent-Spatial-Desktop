@@ -1,6 +1,7 @@
 #include "shell/ShellWindowManager.h"
 
 #include "compositor/HyprlandIpcBridge.h"
+#include "compositor/SpatialCompositorSync.h"
 #include "core/DesignTokens.h"
 #include "core/SpatialLayout.h"
 #include "core/SpatialMotionController.h"
@@ -61,10 +62,16 @@ void ShellWindowManager::createForScreen(QScreen *screen)
     instance->motion->setDurationMs(
         m_designTokens->value(QStringLiteral("motion.durationMs.spatial")).toInt());
 
+    instance->compositorSync = new SpatialCompositorSync(
+        instance->motion, m_compositorBridge, screen->name(), this);
+    instance->compositorSync->setEnabled(
+        qEnvironmentVariableIntValue("PSD_EXPERIMENTAL_HYPRLAND_SYNC") == 1);
+
     instance->context = new QQmlContext(m_engine->rootContext(), this);
     instance->context->setContextProperty(QStringLiteral("SpatialState"), instance->state);
     instance->context->setContextProperty(QStringLiteral("SpatialLayout"), instance->layout);
     instance->context->setContextProperty(QStringLiteral("SpatialMotion"), instance->motion);
+    instance->context->setContextProperty(QStringLiteral("PsdCompositorSync"), instance->compositorSync);
     instance->context->setContextProperty(QStringLiteral("PsdScreenName"), screen->name());
 
     QQmlComponent component(m_engine, QUrl(QStringLiteral("qrc:/qml/Main.qml")));
@@ -104,6 +111,8 @@ void ShellWindowManager::destroyForScreen(QScreen *screen)
 
     if (instance->context)
         instance->context->deleteLater();
+    if (instance->compositorSync)
+        instance->compositorSync->deleteLater();
     if (instance->motion)
         instance->motion->deleteLater();
     if (instance->layout)
