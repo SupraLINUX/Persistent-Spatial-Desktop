@@ -36,6 +36,7 @@ public:
 
     Q_INVOKABLE bool navigate(const QString &destination);
     Q_INVOKABLE void center();
+    Q_INVOKABLE void snapToCenter();
     Q_INVOKABLE void stop();
 
     // Gesture deltas are logical display units. Release velocities are logical
