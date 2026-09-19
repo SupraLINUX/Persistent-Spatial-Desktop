@@ -42,6 +42,49 @@ QVariantList CompositorBridge::windows() const
     return m_windows;
 }
 
+bool CompositorBridge::monitorHasFullscreenWindow(const QString &monitorName) const
+{
+    QVariant monitorId;
+    QVariant activeWorkspaceId;
+
+    for (const QVariant &value : m_monitors) {
+        const QVariantMap monitor = value.toMap();
+        if (monitor.value(QStringLiteral("name")).toString() != monitorName)
+            continue;
+
+        monitorId = monitor.value(QStringLiteral("id"));
+        activeWorkspaceId = monitor.value(QStringLiteral("activeWorkspace"))
+                                .toMap()
+                                .value(QStringLiteral("id"));
+        break;
+    }
+
+    if (!monitorId.isValid() || !activeWorkspaceId.isValid())
+        return false;
+
+    const qlonglong wantedMonitor = monitorId.toLongLong();
+    const qlonglong wantedWorkspace = activeWorkspaceId.toLongLong();
+
+    for (const QVariant &value : m_windows) {
+        const QVariantMap window = value.toMap();
+        if (!window.value(QStringLiteral("mapped"), true).toBool())
+            continue;
+        if (window.value(QStringLiteral("fullscreen")).toInt() == 0)
+            continue;
+        if (window.value(QStringLiteral("monitorId")).toLongLong() != wantedMonitor)
+            continue;
+
+        const qlonglong workspaceId = window.value(QStringLiteral("workspace"))
+                                          .toMap()
+                                          .value(QStringLiteral("id"))
+                                          .toLongLong();
+        if (workspaceId == wantedWorkspace)
+            return true;
+    }
+
+    return false;
+}
+
 void CompositorBridge::setAvailable(bool available)
 {
     if (m_available == available)
