@@ -34,6 +34,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Validate integration scripts
+        run: bash -n tests/integration/*.sh
+
       - name: Configure
         run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug
 
