@@ -97,12 +97,13 @@ for _ in $(seq 1 80); do
         exit 1
     fi
 
-    if hyprctl -j layers | python3 - "$monitor_json" <<'PY' >/dev/null 2>&1
+    layers_json="$(hyprctl -j layers)"
+    if python3 - "$monitor_json" "$layers_json" <<'PY' >/dev/null 2>&1
 import json
 import sys
 
-layers = json.load(sys.stdin)
 monitors = json.loads(sys.argv[1])
+layers = json.loads(sys.argv[2])
 
 for monitor in monitors:
     name = monitor["name"]
