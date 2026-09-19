@@ -17,6 +17,13 @@ if [[ ! -f "$CONFIG_PATH" ]]; then
     exit 1
 fi
 
+if ! compgen -G "/dev/dri/renderD*" >/dev/null; then
+    echo "PSD probe: no DRM render node is available." >&2
+    echo "Aquamarine 0.10 requires a DRM-backed allocator even for the headless output backend." >&2
+    echo "Run this probe on a real/self-hosted Linux system exposing /dev/dri/renderD*." >&2
+    exit 77
+fi
+
 export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-$(mktemp -d)}"
 mkdir -p "$XDG_RUNTIME_DIR"
 chmod 700 "$XDG_RUNTIME_DIR"
