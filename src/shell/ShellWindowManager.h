@@ -46,6 +46,7 @@ private:
     void configureLayerSurface(Instance *instance);
     void configureReturnShield(Instance *instance);
     void updateReturnShield(Instance *instance);
+    [[nodiscard]] Instance *instanceForMonitorName(const QString &monitorName) const;
 
     QQmlApplicationEngine *m_engine = nullptr;
     DesignTokens *m_designTokens = nullptr;
