@@ -14,13 +14,15 @@ CENTER is a conventional Linux desktop with wallpaper/live wallpaper, desktop ic
 
 ## Status
 
-Early architecture, product-definition and prototype-validation phase.
+Implementation bootstrap.
 
-The canonical specifications live under:
+The repository now contains:
 
 - `docs/` — human-readable product, architecture, design, automation, security, app and plugin documentation.
-- `spec/` — versioned machine-readable contracts, schemas and design tokens.
-- `prototypes/` — disposable validation prototypes; these are not production shell implementations.
+- `spec/` — versioned machine-readable contracts, schemas and Spatial Glass design tokens.
+- `src/` — C++ runtime/core implementation.
+- `qml/` — Qt Quick shell UI.
+- `tests/` — core tests.
 
 Current design baselines:
 
@@ -28,29 +30,25 @@ Current design baselines:
 - B — Spatial Glass Design System v0.1
 - C — Automation / APIs / AI Integration v0.1
 
-## Current prototype
+## Current implementation
 
-`prototypes/spatial-shell-v0.3/` validates:
+The first real `psd-shell` runtime is being built directly with Qt 6, Qt Quick/QML and C++.
 
-- persistent LEFT / RIGHT / TOP / DASH surfaces;
-- rigid CENTER translation;
-- edge dwell navigation;
-- CENTER as a conventional desktop with icons and floating windows;
-- direct CENTER -> DASH navigation;
-- continuous Spatial Glass background without the hard gutter color seams from earlier experiments;
-- runtime consumption of `spec/design-tokens.json` when served over HTTP.
+Implemented in the bootstrap:
 
-From the repository root:
+- Qt application/runtime entry point;
+- canonical `spec/design-tokens.json` loaded as an embedded runtime resource;
+- shared C++ `SpatialState`;
+- QML CENTER / LEFT / RIGHT / TOP / DASH object structure;
+- rigid spatial translation;
+- ~180 ms mouse gutter dwell;
+- CENTER return semantics at shell level;
+- core unit tests;
+- Ubuntu 26.04 CI build environment.
 
-```bash
-python3 -m http.server 8080
-```
+This is not yet a complete desktop session. Real compositor-owned application windows and Hyprland integration are subsequent milestones.
 
-Then open:
-
-```text
-http://localhost:8080/prototypes/spatial-shell-v0.3/
-```
+See `docs/development.md` for build instructions and the exact current boundary.
 
 ## Development target
 
