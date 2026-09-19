@@ -1,0 +1,18 @@
+import QtQuick
+import QtQuick.Window
+
+Window {
+    id: window
+
+    width: 1280
+    height: 800
+    minimumWidth: 960
+    minimumHeight: 600
+    visible: true
+    title: "Persistent Spatial Desktop"
+    color: DesignTokens.value("colors.background.deep")
+
+    SpatialRoot {
+        anchors.fill: parent
+    }
+}
