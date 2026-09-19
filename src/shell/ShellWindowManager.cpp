@@ -18,6 +18,7 @@
 #include <QScreen>
 #include <QUrl>
 
+#include <algorithm>
 #include <cmath>
 
 ShellWindowManager::ShellWindowManager(
@@ -222,7 +223,7 @@ void ShellWindowManager::updateReturnShield(Instance *instance)
         return;
 
     if (instance->motion->running()) {
-        layerWindow->setMargins({});
+        layerWindow->setMargins(QMargins{});
         if (!instance->returnShield->isVisible())
             instance->returnShield->show();
         return;
