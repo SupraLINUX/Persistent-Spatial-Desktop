@@ -24,11 +24,13 @@ The optional build target `psd-hyprland-plugin` registers three internal dispatc
 
 The offset command applies a render offset to the active regular workspace of the explicitly named monitor and damages only that monitor.
 
-The experiment refuses:
+The experiment refuses non-zero offsets for:
 
 - missing monitor/workspace;
 - special workspaces;
 - workspaces containing fullscreen content.
+
+A zero reset through `plugin:psd:reset` remains allowed in fullscreen. This is required so entering fullscreen can never strand a previous spatial render offset.
 
 Plugin unload resets every workspace touched by this experiment. Four-finger gesture interception is disabled by default and must be explicitly armed.
 
@@ -113,7 +115,7 @@ It does not yet prove:
 - pinned windows should move or stay fixed;
 - continuous four-finger gesture latency is acceptable;
 - multi-monitor isolation is correct;
-- fullscreen/direct-scanout transitions are correct;
+- fullscreen shell unmap/remap and direct-scanout behavior are correct on real hardware;
 - damage remains minimal under all cases.
 
 Those questions must be tested before adopting `m_renderOffset` as the production transform mechanism.
