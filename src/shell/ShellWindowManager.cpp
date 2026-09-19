@@ -18,6 +18,7 @@
 #include <QScreen>
 #include <QUrl>
 
+#include <algorithm>
 
 ShellWindowManager::ShellWindowManager(
     QQmlApplicationEngine *engine,
