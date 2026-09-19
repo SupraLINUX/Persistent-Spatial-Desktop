@@ -132,7 +132,7 @@ void HyprlandIpcBridge::resetExperimentalSpatialOffset(const QString &monitorNam
 {
     if (!capabilities().value(QStringLiteral("spatialRenderOffsetExperimental")).toBool()) {
         emit experimentalSpatialCommandFinished(
-            false, QStringLiteral("PSD Hyprland spatial plugin capability is unavailable"));
+            monitorName, false, QStringLiteral("PSD Hyprland spatial plugin capability is unavailable"));
         return;
     }
 
