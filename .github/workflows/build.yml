@@ -21,7 +21,9 @@ jobs:
             cmake \
             ninja-build \
             qt6-base-dev \
-            qt6-declarative-dev
+            qt6-declarative-dev \
+            qt6-wayland \
+            liblayershellqtinterface-dev
 
       - name: Checkout
         uses: actions/checkout@v4
@@ -53,6 +55,8 @@ jobs:
             pkgconf \
             qt6-base-dev \
             qt6-declarative-dev \
+            qt6-wayland \
+            liblayershellqtinterface-dev \
             hyprland-dev \
             libgles-dev
 
