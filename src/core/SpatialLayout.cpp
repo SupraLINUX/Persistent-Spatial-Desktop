@@ -76,7 +76,6 @@ QPointF SpatialLayout::offsetForSurface(const QString &surface) const
 QMargins SpatialLayout::returnShieldMargins(const QString &surface) const
 {
     const QString normalized = surface.trimmed().toLower();
-    const int width = std::max(0, qRound(m_viewportSize.width()));
     const int height = std::max(0, qRound(m_viewportSize.height()));
     const int gutterValue = std::max(0, qRound(m_gutter));
 
@@ -94,7 +93,6 @@ QMargins SpatialLayout::returnShieldMargins(const QString &surface) const
         return {gutterValue, 0, gutterValue, std::max(0, height - visibleCenter)};
     }
 
-    Q_UNUSED(width);
     return {};
 }
 
