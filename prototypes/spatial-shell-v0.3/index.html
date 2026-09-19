@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>PSD Spatial Prototype v0.3</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body data-surface="center" data-edge-arming="">
+  <div class="viewport" id="viewport">
+    <div class="ambient ambient-a"></div>
+    <div class="ambient ambient-b"></div>
+    <div class="ambient ambient-c"></div>
+
+    <div class="world" id="world">
+      <section class="surface surface-left" aria-label="LEFT">
+        <div class="surface-inner left-layout">
+          <header class="surface-heading">
+            <div>
+              <div class="eyebrow">LEFT</div>
+              <h1>Apps &amp; archivos</h1>
+            </div>
+            <span class="surface-purpose">Encontrar y abrir</span>
+          </header>
+
+          <div class="search-field">
+            <span class="search-icon">⌕</span>
+            <span>Buscar apps, archivos o acciones…</span>
+            <kbd>Search</kbd>
+          </div>
+
+          <section>
+            <div class="section-label">Aplicaciones</div>
+            <div class="app-grid compact">
+              <button class="app-tile"><span class="app-icon">◎</span><span>Navegador</span></button>
+              <button class="app-tile"><span class="app-icon">▣</span><span>Archivos</span></button>
+              <button class="app-tile"><span class="app-icon">⌁</span><span>Terminal</span></button>
+              <button class="app-tile"><span class="app-icon">✎</span><span>Notas</span></button>
+              <button class="app-tile"><span class="app-icon">◇</span><span>Proyectos</span></button>
+              <button class="app-tile"><span class="app-icon">⚙</span><span>Ajustes</span></button>
+            </div>
+          </section>
+
+          <section class="recent-card glass-card">
+            <div class="section-label">Recientes</div>
+            <div class="recent-row"><span>▰</span><div><strong>Persistent Spatial Desktop</strong><small>Proyecto</small></div></div>
+            <div class="recent-row"><span>≡</span><div><strong>product-spec.md</strong><small>Documento</small></div></div>
+            <div class="recent-row"><span>◫</span><div><strong>Mockups</strong><small>Carpeta</small></div></div>
+          </section>
+        </div>
+      </section>
+
+      <section class="surface surface-right" aria-label="RIGHT">
+        <div class="surface-inner">
+          <header class="surface-heading">
+            <div>
+              <div class="eyebrow">RIGHT</div>
+              <h1>Control Center</h1>
+            </div>
+            <span class="surface-purpose">Control e inteligencia</span>
+          </header>
+
+          <div class="control-grid">
+            <button class="control-card active"><span class="control-icon">⌁</span><strong>Wi‑Fi</strong><small>SupraNet</small></button>
+            <button class="control-card active"><span class="control-icon">ᛒ</span><strong>Bluetooth</strong><small>Activo</small></button>
+            <button class="control-card"><span class="control-icon">◖</span><strong>Audio</strong><small>68%</small></button>
+            <button class="control-card"><span class="control-icon">☼</span><strong>Brillo</strong><small>82%</small></button>
+          </div>
+
+          <div class="slider-card glass-card">
+            <div class="slider-head"><span>Volumen</span><strong>68%</strong></div>
+            <div class="slider-track"><span style="width:68%"></span></div>
+          </div>
+
+          <article class="assistant-card glass-card">
+            <div class="assistant-orb">✦</div>
+            <div>
+              <div class="section-label">IA</div>
+              <h2>¿Qué querés hacer?</h2>
+              <p>Puede actuar por API y representar visualmente cada paso si querés verlo.</p>
+            </div>
+          </article>
+
+          <div class="utility-row">
+            <button>Clipboard</button>
+            <button>Devices</button>
+            <button>Power</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="surface surface-top" aria-label="TOP">
+        <div class="surface-inner top-layout">
+          <article class="top-panel glass-card">
+            <header><span class="eyebrow">NOTIFICACIONES</span><strong>3 nuevas</strong></header>
+            <div class="notification-row"><span class="mini-icon">✓</span><div><b>Build completado</b><small>PSD prototype · ahora</small></div></div>
+            <div class="notification-row"><span class="mini-icon">↻</span><div><b>Actualizaciones</b><small>3 paquetes disponibles</small></div></div>
+            <div class="notification-row"><span class="mini-icon">●</span><div><b>Proyecto</b><small>Nueva actividad</small></div></div>
+          </article>
+
+          <article class="top-panel glass-card">
+            <header><span class="eyebrow">HOY</span><strong>18 SEP</strong></header>
+            <div class="calendar-big">18</div>
+            <div class="agenda-row"><span>14:30</span><b>Proyecto PSD</b></div>
+            <div class="agenda-row"><span>19:00</span><b>Personal</b></div>
+          </article>
+
+          <article class="top-panel glass-card">
+            <header><span class="eyebrow">OVERVIEW</span><strong>Workspaces</strong></header>
+            <div class="workspace-previews">
+              <button class="workspace-preview current"><span>1</span><small>Desktop</small></button>
+              <button class="workspace-preview"><span>2</span><small>Code</small></button>
+              <button class="workspace-preview"><span>3</span><small>Web</small></button>
+              <button class="workspace-preview"><span>4</span><small>Media</small></button>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <section class="surface surface-dash" aria-label="DASH">
+        <div class="dash-inner">
+          <header class="dash-header">
+            <div>
+              <div class="eyebrow">DASH</div>
+              <h1>Aplicaciones</h1>
+              <p>Todo esto ya estaba acá.</p>
+            </div>
+            <div class="dash-search">⌕ <span>Buscar aplicaciones…</span></div>
+          </header>
+
+          <div class="dash-apps">
+            <button class="dash-app"><span class="dash-icon">◎</span><span>Navegador</span></button>
+            <button class="dash-app"><span class="dash-icon">▣</span><span>Archivos</span></button>
+            <button class="dash-app"><span class="dash-icon">⌁</span><span>Terminal</span></button>
+            <button class="dash-app"><span class="dash-icon">✦</span><span>Viernes</span></button>
+            <button class="dash-app"><span class="dash-icon">✎</span><span>Notas</span></button>
+            <button class="dash-app"><span class="dash-icon">⚙</span><span>Ajustes</span></button>
+            <button class="dash-app"><span class="dash-icon">♫</span><span>Música</span></button>
+            <button class="dash-app"><span class="dash-icon">▶</span><span>Videos</span></button>
+            <button class="dash-app"><span class="dash-icon">▧</span><span>Fotos</span></button>
+            <button class="dash-app"><span class="dash-icon">◌</span><span>Mensajes</span></button>
+            <button class="dash-app"><span class="dash-icon">◇</span><span>Proyectos</span></button>
+            <button class="dash-app"><span class="dash-icon">⬡</span><span>Software</span></button>
+          </div>
+
+          <footer class="dash-footer">
+            <div class="now-playing glass-card"><span class="album">♫</span><div><strong>Midnight Drive</strong><small>Playing · 02:17 / 04:08</small></div><span class="media-actions">‹ Ⅱ ›</span></div>
+            <nav class="dock" aria-label="Dock">
+              <button>◎</button><button>▣</button><button>⌁</button><button>✦</button><button>⚙</button>
+            </nav>
+            <div class="dash-pages"><i class="active"></i><i></i><i></i></div>
+          </footer>
+        </div>
+      </section>
+
+      <main class="workspace" id="workspace" aria-label="CENTER">
+        <div class="wallpaper-grid"></div>
+        <div class="wallpaper-light light-one"></div>
+        <div class="wallpaper-light light-two"></div>
+
+        <section class="desktop-icons" aria-label="Iconos del escritorio">
+          <button class="desktop-icon"><span class="desktop-icon-box">▣</span><span>Proyectos</span></button>
+          <button class="desktop-icon"><span class="desktop-icon-box">≡</span><span>Notas.md</span></button>
+          <button class="desktop-icon"><span class="desktop-icon-box">⌫</span><span>Papelera</span></button>
+        </section>
+
+        <article class="app-window terminal-window focused">
+          <header class="titlebar">
+            <div class="window-controls"><button aria-label="Minimizar">−</button><button aria-label="Maximizar">□</button><button aria-label="Cerrar">×</button></div>
+            <span>Terminal — Persistent Spatial Desktop</span>
+          </header>
+          <div class="terminal-content">
+            <p><b>$</b> ./psd-shell --prototype</p>
+            <p>Loading persistent surfaces...</p>
+            <p><span>left</span> ........ ready</p>
+            <p><span>right</span> ....... ready</p>
+            <p><span>top</span> ......... ready</p>
+            <p><span>dash</span> ........ ready</p>
+            <p class="terminal-emphasis">Everything is already there.</p>
+          </div>
+        </article>
+
+        <article class="app-window project-window">
+          <header class="titlebar">
+            <div class="window-controls"><button aria-label="Minimizar">−</button><button aria-label="Maximizar">□</button><button aria-label="Cerrar">×</button></div>
+            <span>Proyecto</span>
+          </header>
+          <div class="project-content">
+            <div class="project-card"><strong>Shell</strong><small>Diseño espacial</small></div>
+            <div class="project-card"><strong>Desktop</strong><small>Iconos + ventanas</small></div>
+            <div class="project-card"><strong>APIs</strong><small>Semánticas</small></div>
+            <div class="project-card"><strong>State</strong><small>Persistente</small></div>
+          </div>
+        </article>
+
+        <div class="center-return-zone" id="centerReturnZone" aria-label="Volver a CENTER"></div>
+      </main>
+    </div>
+
+    <div class="edge-zone edge-left" data-edge="left"></div>
+    <div class="edge-zone edge-right" data-edge="right"></div>
+    <div class="edge-zone edge-top" data-edge="top"></div>
+    <div class="edge-zone edge-bottom" data-edge="dash"></div>
+
+    <div class="edge-intent edge-intent-left"></div>
+    <div class="edge-intent edge-intent-right"></div>
+    <div class="edge-intent edge-intent-top"></div>
+    <div class="edge-intent edge-intent-bottom"></div>
+
+    <div class="prototype-hint" id="hint">Tocá cualquier borde · Esc vuelve a CENTER</div>
+    <div class="prototype-status"><span class="status-dot"></span><span id="statusText">CENTER</span></div>
+    <button class="return-button" id="returnButton">Volver a CENTER</button>
+  </div>
+
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
