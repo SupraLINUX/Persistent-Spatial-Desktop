@@ -99,11 +99,13 @@ void HyprlandIpcBridge::refreshCapabilities()
                             object.value(QStringLiteral("pluginVersion")).toString());
         capabilities.insert(QStringLiteral("spatialRenderOffsetExperimental"),
                             object.value(QStringLiteral("spatialRenderOffsetExperimental")).toBool());
+        capabilities.insert(QStringLiteral("monitorTargeting"),
+                            object.value(QStringLiteral("monitorTargeting")).toBool());
         setCapabilities(std::move(capabilities));
     }, false);
 }
 
-void HyprlandIpcBridge::setExperimentalSpatialOffset(double x, double y)
+void HyprlandIpcBridge::setExperimentalSpatialOffset(const QString &monitorName, double x, double y)
 {
     if (!capabilities().value(QStringLiteral("spatialRenderOffsetExperimental")).toBool()) {
         emit experimentalSpatialCommandFinished(
@@ -113,6 +115,8 @@ void HyprlandIpcBridge::setExperimentalSpatialOffset(double x, double y)
 
     const QByteArray request =
         QByteArrayLiteral("dispatch plugin:psd:offset ")
+        + monitorName.toUtf8()
+        + ' '
         + QByteArray::number(x, 'f', 3)
         + ' '
         + QByteArray::number(y, 'f', 3);
@@ -124,7 +128,7 @@ void HyprlandIpcBridge::setExperimentalSpatialOffset(double x, double y)
     });
 }
 
-void HyprlandIpcBridge::resetExperimentalSpatialOffset()
+void HyprlandIpcBridge::resetExperimentalSpatialOffset(const QString &monitorName)
 {
     if (!capabilities().value(QStringLiteral("spatialRenderOffsetExperimental")).toBool()) {
         emit experimentalSpatialCommandFinished(
@@ -132,7 +136,7 @@ void HyprlandIpcBridge::resetExperimentalSpatialOffset()
         return;
     }
 
-    requestText(QByteArrayLiteral("dispatch plugin:psd:reset"),
+    requestText(QByteArrayLiteral("dispatch plugin:psd:reset ") + monitorName.toUtf8(),
                 [this](const QByteArray &response) {
         const QString result = QString::fromUtf8(response).trimmed();
         const bool success = result == QStringLiteral("ok");
