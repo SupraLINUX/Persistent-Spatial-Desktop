@@ -78,6 +78,8 @@ The spatial bridge must expose a coherent workspace/surface transform. Avoid imp
 
 Input is intentionally separated from render translation. During a spatial transition, a monitor-local transparent LayerTop shield consumes pointer presses so displaced applications cannot receive accidental input. After the transition settles, the shield covers only the still-visible CENTER area; the revealed PSD surface remains interactive. In CENTER the shield is unmapped.
 
+Explicit application fullscreen is monitor-scoped bypass state. When the active workspace on an output contains fullscreen content, PSD immediately resets that monitor to CENTER, unmaps both its return shield and its shell layer surface, and leaves the physical output to the application/compositor. When fullscreen ends, the monitor-local PSD shell remaps in CENTER. This preserves the product distinction between maximize and fullscreen and removes PSD layer surfaces from that output while fullscreen is active.
+
 ## Compositor bridge layers
 
 The compositor integration is split intentionally.
