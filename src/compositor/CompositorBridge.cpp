@@ -22,6 +22,11 @@ QString CompositorBridge::lastError() const
     return m_lastError;
 }
 
+QVariantMap CompositorBridge::capabilities() const
+{
+    return m_capabilities;
+}
+
 QVariantList CompositorBridge::monitors() const
 {
     return m_monitors;
@@ -62,6 +67,15 @@ void CompositorBridge::setLastError(const QString &error)
 
     m_lastError = error;
     emit lastErrorChanged();
+}
+
+void CompositorBridge::setCapabilities(QVariantMap capabilities)
+{
+    if (m_capabilities == capabilities)
+        return;
+
+    m_capabilities = std::move(capabilities);
+    emit capabilitiesChanged();
 }
 
 void CompositorBridge::setMonitors(QVariantList monitors)
