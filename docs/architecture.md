@@ -76,6 +76,8 @@ The runtime creates one independent layer-shell window per `QScreen`. Each monit
 
 The spatial bridge must expose a coherent workspace/surface transform. Avoid implementing the effect by moving every application window independently if the compositor can expose a lower-level transformation.
 
+Input is intentionally separated from render translation. During a spatial transition, a monitor-local transparent LayerTop shield consumes pointer presses so displaced applications cannot receive accidental input. After the transition settles, the shield covers only the still-visible CENTER area; the revealed PSD surface remains interactive. In CENTER the shield is unmapped.
+
 ## Compositor bridge layers
 
 The compositor integration is split intentionally.
