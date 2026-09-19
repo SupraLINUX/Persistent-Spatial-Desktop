@@ -1,6 +1,7 @@
 #define WLR_USE_UNSTABLE
 
 #include <hyprland/src/Compositor.hpp>
+#include <hyprland/src/SharedDefs.hpp>
 #include <hyprland/src/desktop/Workspace.hpp>
 #include <hyprland/src/desktop/state/FocusState.hpp>
 #include <hyprland/src/plugins/PluginAPI.hpp>
@@ -15,6 +16,7 @@
 namespace {
 
 HANDLE g_handle = nullptr;
+SP<SHyprCtlCommand> g_capabilitiesCommand;
 std::vector<PHLWORKSPACEREF> g_touchedWorkspaces;
 
 void rememberWorkspace(const PHLWORKSPACE &workspace)
@@ -87,6 +89,15 @@ SDispatchResult resetOffset(std::string)
     return {};
 }
 
+std::string capabilitiesResponse(eHyprCtlOutputFormat format, std::string)
+{
+    if (format == FORMAT_JSON) {
+        return R"json({"protocolVersion":1,"pluginVersion":"0.1.0","spatialRenderOffsetExperimental":true})json";
+    }
+
+    return "protocolVersion=1 pluginVersion=0.1.0 spatialRenderOffsetExperimental=true";
+}
+
 void resetTouchedWorkspaces()
 {
     for (const PHLWORKSPACEREF &weak : g_touchedWorkspaces) {
@@ -126,8 +137,17 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle)
     success = success && HyprlandAPI::addDispatcherV2(
         g_handle, "plugin:psd:reset", resetOffset);
 
+    g_capabilitiesCommand = HyprlandAPI::registerHyprCtlCommand(
+        g_handle,
+        SHyprCtlCommand{
+            .name = "psd-plugin",
+            .exact = true,
+            .fn = capabilitiesResponse,
+        });
+    success = success && static_cast<bool>(g_capabilitiesCommand);
+
     if (!success)
-        throw std::runtime_error("PSD failed to register experimental Hyprland dispatchers");
+        throw std::runtime_error("PSD failed to register experimental Hyprland integration");
 
     return {
         "psd-hyprland-plugin",
@@ -142,6 +162,8 @@ APICALL EXPORT void PLUGIN_EXIT()
     resetTouchedWorkspaces();
 
     if (g_handle) {
+        if (g_capabilitiesCommand)
+            HyprlandAPI::unregisterHyprCtlCommand(g_handle, g_capabilitiesCommand);
         HyprlandAPI::removeDispatcher(g_handle, "plugin:psd:offset");
         HyprlandAPI::removeDispatcher(g_handle, "plugin:psd:reset");
     }
