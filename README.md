@@ -14,18 +14,43 @@ CENTER is a conventional Linux desktop with wallpaper/live wallpaper, desktop ic
 
 ## Status
 
-Early architecture and product-definition phase.
+Early architecture, product-definition and prototype-validation phase.
 
 The canonical specifications live under:
 
 - `docs/` — human-readable product, architecture, design, automation, security, app and plugin documentation.
 - `spec/` — versioned machine-readable contracts, schemas and design tokens.
+- `prototypes/` — disposable validation prototypes; these are not production shell implementations.
 
 Current design baselines:
 
 - A — Product / UX Specification v0.1
 - B — Spatial Glass Design System v0.1
 - C — Automation / APIs / AI Integration v0.1
+
+## Current prototype
+
+`prototypes/spatial-shell-v0.3/` validates:
+
+- persistent LEFT / RIGHT / TOP / DASH surfaces;
+- rigid CENTER translation;
+- edge dwell navigation;
+- CENTER as a conventional desktop with icons and floating windows;
+- direct CENTER -> DASH navigation;
+- continuous Spatial Glass background without the hard gutter color seams from earlier experiments;
+- runtime consumption of `spec/design-tokens.json` when served over HTTP.
+
+From the repository root:
+
+```bash
+python3 -m http.server 8080
+```
+
+Then open:
+
+```text
+http://localhost:8080/prototypes/spatial-shell-v0.3/
+```
 
 ## Development target
 
