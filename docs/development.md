@@ -77,6 +77,7 @@ It then connects to Hyprland's documented command and event UNIX sockets.
 - mouse gutter dwell navigation;
 - rigid translation between shell surfaces driven by a single C++ motion controller;
 - CENTER return semantics;
+- per-monitor transparent return shield preventing displaced apps from receiving the first click;
 - generic internal compositor bridge abstraction;
 - Hyprland IPC state backend;
 - monitor/workspace/window normalization;
