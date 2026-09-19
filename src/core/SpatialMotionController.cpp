@@ -141,6 +141,20 @@ void SpatialMotionController::center()
     navigate(QStringLiteral("center"));
 }
 
+void SpatialMotionController::snapToCenter()
+{
+    if (m_animation.state() == QAbstractAnimation::Running)
+        m_animation.stop();
+
+    if (m_gestureActive)
+        finishGestureTracking();
+
+    setTargetSurface(QStringLiteral("center"));
+    m_state->center();
+    setOffset(QPointF{});
+    emit transitionFinished(QStringLiteral("center"));
+}
+
 void SpatialMotionController::stop()
 {
     if (m_gestureActive)
