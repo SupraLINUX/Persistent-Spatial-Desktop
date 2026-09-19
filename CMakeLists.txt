@@ -13,6 +13,8 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 include(CTest)
 
+option(PSD_BUILD_HYPRLAND_PLUGIN "Build the experimental Hyprland compositor plugin" OFF)
+
 find_package(Qt6 6.10 REQUIRED COMPONENTS Core Gui Network Qml Quick)
 qt_standard_project_setup(REQUIRES 6.10)
 
@@ -70,6 +72,10 @@ qt_add_resources(psd-shell "psd_shell_resources"
 install(TARGETS psd-shell
     RUNTIME DESTINATION bin
 )
+
+if(PSD_BUILD_HYPRLAND_PLUGIN)
+    add_subdirectory(src/compositor/hyprland-plugin)
+endif()
 
 if(BUILD_TESTING)
     find_package(Qt6 6.10 REQUIRED COMPONENTS Test)
