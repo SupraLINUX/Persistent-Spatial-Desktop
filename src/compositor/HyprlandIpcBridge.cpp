@@ -109,7 +109,7 @@ void HyprlandIpcBridge::setExperimentalSpatialOffset(const QString &monitorName,
 {
     if (!capabilities().value(QStringLiteral("spatialRenderOffsetExperimental")).toBool()) {
         emit experimentalSpatialCommandFinished(
-            false, QStringLiteral("PSD Hyprland spatial plugin capability is unavailable"));
+            monitorName, false, QStringLiteral("PSD Hyprland spatial plugin capability is unavailable"));
         return;
     }
 
@@ -121,10 +121,10 @@ void HyprlandIpcBridge::setExperimentalSpatialOffset(const QString &monitorName,
         + ' '
         + QByteArray::number(y, 'f', 3);
 
-    requestText(request, [this](const QByteArray &response) {
+    requestText(request, [this, monitorName](const QByteArray &response) {
         const QString result = QString::fromUtf8(response).trimmed();
         const bool success = result == QStringLiteral("ok");
-        emit experimentalSpatialCommandFinished(success, result);
+        emit experimentalSpatialCommandFinished(monitorName, success, result);
     });
 }
 
@@ -137,10 +137,10 @@ void HyprlandIpcBridge::resetExperimentalSpatialOffset(const QString &monitorNam
     }
 
     requestText(QByteArrayLiteral("dispatch plugin:psd:reset ") + monitorName.toUtf8(),
-                [this](const QByteArray &response) {
+                [this, monitorName](const QByteArray &response) {
         const QString result = QString::fromUtf8(response).trimmed();
         const bool success = result == QStringLiteral("ok");
-        emit experimentalSpatialCommandFinished(success, result);
+        emit experimentalSpatialCommandFinished(monitorName, success, result);
     });
 }
 
