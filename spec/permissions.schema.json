@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://supralinux.github.io/psd/spec/permissions.schema.json",
+  "title": "PSD Permission Description",
+  "type": "object",
+  "required": [
+    "id",
+    "description",
+    "risk"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*(\\.[a-z][a-z0-9-]*)+$"
+    },
+    "description": {
+      "type": "string"
+    },
+    "risk": {
+      "enum": [
+        "low",
+        "medium",
+        "high"
+      ]
+    },
+    "userConfirmationRecommended": {
+      "type": "boolean",
+      "default": false
+    }
+  },
+  "additionalProperties": false
+}
