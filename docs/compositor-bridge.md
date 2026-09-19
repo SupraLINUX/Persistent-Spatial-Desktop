@@ -55,7 +55,7 @@ Hyprland handles command-socket requests synchronously. PSD therefore:
 - closes the connection immediately;
 - enforces a one-second safety timeout.
 
-This bridge currently issues only read-only information commands:
+The state/introspection path issues read-only information commands:
 
 - `j/monitors`;
 - `j/workspaces`;
@@ -66,6 +66,19 @@ This bridge currently issues only read-only information commands:
 The shell can compile and run its core without Hyprland development headers. This avoids unnecessary ABI coupling during the state/introspection phase.
 
 Ubuntu 26.04's Hyprland package is the runtime target for integration testing, not a compile-time dependency of `psd-core` at this stage.
+
+## Experimental plugin handshake
+
+When the PSD Hyprland plugin is loaded, the bridge probes the custom `j/psd-plugin` command. The response declares a small versioned capability set rather than forcing the runtime to infer plugin availability.
+
+The current experimental protocol is monitor-scoped and advertises:
+
+- protocol version;
+- plugin version;
+- render-offset experiment support;
+- explicit monitor targeting.
+
+Without this handshake, compositor motion sync remains disabled.
 
 ## Phase 2: spatial transform
 
@@ -82,6 +95,6 @@ That phase should use the narrowest compositor-side integration capable of:
 - fullscreen bypass;
 - per-monitor independence.
 
-The likely implementation is a PSD-specific Hyprland plugin/extension behind the same compositor abstraction.
+A PSD-specific Hyprland plugin now exists as an experiment behind the same compositor abstraction. It can apply `CWorkspace::m_renderOffset` to the active regular workspace of a named monitor. This remains a proof of concept, not an accepted production mechanism.
 
 Do not emulate the final spatial transform by repeatedly moving each client window through public dispatchers unless implementation evidence proves there is no better compositor-level path.
