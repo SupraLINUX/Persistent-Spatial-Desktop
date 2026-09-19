@@ -18,6 +18,7 @@ private slots:
     void spatialStateNavigates();
     void spatialStateRejectsUnknownDestination();
     void spatialLayoutComputesResponsiveGeometry();
+    void spatialLayoutComputesReturnShieldMargins();
     void spatialMotionUsesSingleAuthoritativeOffset();
     void hyprlandSocketPaths();
     void hyprlandEventParsing();
@@ -84,6 +85,23 @@ void CoreTest::spatialLayoutComputesResponsiveGeometry()
     const QPointF dash = layout.offsetForSurface(QStringLiteral("dash"));
     QCOMPARE(dash.x(), 0.0);
     QCOMPARE(dash.y(), -(1080.0 - (layout.gutter() * 3.0)));
+}
+
+void CoreTest::spatialLayoutComputesReturnShieldMargins()
+{
+    SpatialLayout layout;
+    layout.setViewportSize(QSizeF(1920, 1080));
+
+    const int gutter = qRound(layout.gutter());
+    QCOMPARE(layout.returnShieldMargins(QStringLiteral("left")),
+             QMargins(qRound(layout.leftWidth()), gutter, 0, gutter));
+    QCOMPARE(layout.returnShieldMargins(QStringLiteral("right")),
+             QMargins(0, gutter, qRound(layout.rightWidth()), gutter));
+    QCOMPARE(layout.returnShieldMargins(QStringLiteral("top")),
+             QMargins(gutter, qRound(layout.topHeight()), gutter, 0));
+    QCOMPARE(layout.returnShieldMargins(QStringLiteral("dash")),
+             QMargins(gutter, 0, gutter, 1080 - (gutter * 2)));
+    QCOMPARE(layout.returnShieldMargins(QStringLiteral("center")), QMargins());
 }
 
 void CoreTest::spatialMotionUsesSingleAuthoritativeOffset()
