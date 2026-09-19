@@ -85,15 +85,21 @@ import json
 import sys
 
 data = json.loads(sys.argv[1])
-assert data["protocolVersion"] == 2, data
+assert data["protocolVersion"] == 3, data
 assert data["spatialRenderOffsetExperimental"] is True, data
 assert data["monitorTargeting"] is True, data
+assert data["fourFingerGestureEventsExperimental"] is True, data
+assert data["gestureEventsDefaultEnabled"] is False, data
 print("PSD probe: capability handshake PASS")
 PY
 
 hyprctl dispatch plugin:psd:offset "$monitor_name 64 0" | grep -qx "ok"
 hyprctl dispatch plugin:psd:reset "$monitor_name" | grep -qx "ok"
 echo "PSD probe: monitor-scoped offset/reset PASS"
+
+hyprctl dispatch plugin:psd:gesture-events 1 | grep -qx "ok"
+hyprctl dispatch plugin:psd:gesture-events 0 | grep -qx "ok"
+echo "PSD probe: gesture arm/disarm PASS"
 
 hyprctl plugin unload "$PLUGIN_PATH" | grep -qx "ok"
 echo "PSD probe: plugin unload PASS"
