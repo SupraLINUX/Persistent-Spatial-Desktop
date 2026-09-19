@@ -71,6 +71,34 @@ The compositor owns real application windows. The PSD shell owns spatial surface
 
 The spatial bridge must expose a coherent workspace/surface transform. Avoid implementing the effect by moving every application window independently if the compositor can expose a lower-level transformation.
 
+## Compositor bridge layers
+
+The compositor integration is split intentionally.
+
+### State/introspection layer
+
+Current implementation:
+
+- generic internal `CompositorBridge`;
+- `HyprlandIpcBridge` backend;
+- public Hyprland IPC sockets only;
+- normalized monitors/workspaces/windows;
+- event-driven updates through Hyprland's event socket;
+- no periodic polling;
+- no compile-time dependency on Hyprland headers.
+
+This layer is read-only during the bootstrap phase.
+
+### Spatial-transform layer
+
+The defining PSD spatial transform requires compositor-side cooperation. It should provide monitor-scoped continuous translation for CENTER and compositor-owned application windows while preserving input, focus, fullscreen semantics and damage tracking.
+
+The expected implementation is a narrow PSD-specific Hyprland plugin/extension behind the compositor abstraction.
+
+Do not implement the final effect by repeatedly dispatching per-window move commands unless a prototype demonstrates that compositor-level transformation is impossible.
+
+See `docs/compositor-bridge.md`.
+
 ## Runtime modularity
 
 Prefer one main Qt/QML runtime with modular components and shared state.
