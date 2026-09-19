@@ -3,6 +3,7 @@
 #include <QObject>
 #include <QString>
 #include <QVariantList>
+#include <QVariantMap>
 
 class CompositorBridge : public QObject
 {
@@ -11,6 +12,7 @@ class CompositorBridge : public QObject
     Q_PROPERTY(bool available READ available NOTIFY availableChanged)
     Q_PROPERTY(bool eventStreamConnected READ eventStreamConnected NOTIFY eventStreamConnectedChanged)
     Q_PROPERTY(QString lastError READ lastError NOTIFY lastErrorChanged)
+    Q_PROPERTY(QVariantMap capabilities READ capabilities NOTIFY capabilitiesChanged)
     Q_PROPERTY(QVariantList monitors READ monitors NOTIFY monitorsChanged)
     Q_PROPERTY(QVariantList workspaces READ workspaces NOTIFY workspacesChanged)
     Q_PROPERTY(QVariantList windows READ windows NOTIFY windowsChanged)
@@ -23,6 +25,7 @@ public:
     [[nodiscard]] bool available() const noexcept;
     [[nodiscard]] bool eventStreamConnected() const noexcept;
     [[nodiscard]] QString lastError() const;
+    [[nodiscard]] QVariantMap capabilities() const;
     [[nodiscard]] QVariantList monitors() const;
     [[nodiscard]] QVariantList workspaces() const;
     [[nodiscard]] QVariantList windows() const;
@@ -34,6 +37,7 @@ signals:
     void availableChanged();
     void eventStreamConnectedChanged();
     void lastErrorChanged();
+    void capabilitiesChanged();
     void monitorsChanged();
     void workspacesChanged();
     void windowsChanged();
@@ -43,6 +47,7 @@ protected:
     void setAvailable(bool available);
     void setEventStreamConnected(bool connected);
     void setLastError(const QString &error);
+    void setCapabilities(QVariantMap capabilities);
     void setMonitors(QVariantList monitors);
     void setWorkspaces(QVariantList workspaces);
     void setWindows(QVariantList windows);
@@ -51,6 +56,7 @@ private:
     bool m_available = false;
     bool m_eventStreamConnected = false;
     QString m_lastError;
+    QVariantMap m_capabilities;
     QVariantList m_monitors;
     QVariantList m_workspaces;
     QVariantList m_windows;
