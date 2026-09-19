@@ -119,6 +119,8 @@ void ShellWindowManager::createForScreen(QScreen *screen)
     instance->returnShield->setScreen(screen);
     configureReturnShield(instance);
 
+    connect(instance->motion, &SpatialMotionController::runningChanged,
+            this, [this, instance] { updateReturnShield(instance); });
     connect(instance->motion, &SpatialMotionController::transitionStarted,
             this, [this, instance](const QString &) { updateReturnShield(instance); });
     connect(instance->motion, &SpatialMotionController::transitionFinished,
