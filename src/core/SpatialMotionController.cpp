@@ -4,8 +4,16 @@
 #include "core/SpatialState.h"
 
 #include <QEasingCurve>
+#include <QtGlobal>
 
 #include <algorithm>
+#include <cmath>
+
+namespace {
+constexpr double kGestureAxisLockDistance = 8.0;
+constexpr double kGestureCommitProgress = 0.45;
+constexpr double kGestureCommitVelocityPerSecond = 1.0;
+}
 
 SpatialMotionController::SpatialMotionController(
     SpatialState *state, SpatialLayout *layout, QObject *parent)
@@ -66,7 +74,17 @@ double SpatialMotionController::offsetY() const noexcept
 
 bool SpatialMotionController::running() const noexcept
 {
-    return m_animation.state() == QAbstractAnimation::Running;
+    return m_gestureActive || m_animation.state() == QAbstractAnimation::Running;
+}
+
+bool SpatialMotionController::gestureActive() const noexcept
+{
+    return m_gestureActive;
+}
+
+double SpatialMotionController::gestureProgress() const noexcept
+{
+    return m_gestureProgress;
 }
 
 QString SpatialMotionController::targetSurface() const
@@ -96,7 +114,9 @@ bool SpatialMotionController::navigate(const QString &destination)
     if (!m_state->destinations().contains(normalized))
         return false;
 
-    if (running())
+    if (m_gestureActive)
+        finishGestureTracking();
+    if (m_animation.state() == QAbstractAnimation::Running)
         m_animation.stop();
 
     setTargetSurface(normalized);
@@ -108,6 +128,7 @@ bool SpatialMotionController::navigate(const QString &destination)
         return true;
     }
 
+    m_animation.setDuration(m_durationMs);
     m_animation.setStartValue(m_offset);
     m_animation.setEndValue(destinationOffset);
     emit transitionStarted(normalized);
@@ -122,10 +143,81 @@ void SpatialMotionController::center()
 
 void SpatialMotionController::stop()
 {
-    if (!running())
-        return;
+    if (m_gestureActive)
+        finishGestureTracking();
 
-    m_animation.stop();
+    if (m_animation.state() == QAbstractAnimation::Running)
+        m_animation.stop();
+}
+
+bool SpatialMotionController::beginGesture()
+{
+    if (m_state->currentSurface() != QStringLiteral("center"))
+        return false;
+
+    if (m_animation.state() == QAbstractAnimation::Running)
+        m_animation.stop();
+
+    m_gestureStartOffset = m_offset;
+    m_gestureAccumulated = {};
+    m_gestureDestination.clear();
+    setGestureProgress(0.0);
+    setGestureActive(true);
+    return true;
+}
+
+bool SpatialMotionController::updateGesture(double deltaX, double deltaY)
+{
+    if (!m_gestureActive)
+        return false;
+
+    m_gestureAccumulated += QPointF(deltaX, deltaY);
+    const QPointF candidate = m_gestureStartOffset + m_gestureAccumulated;
+
+    if (m_gestureDestination.isEmpty()) {
+        m_gestureDestination = gestureDestinationFor(candidate);
+        if (m_gestureDestination.isEmpty())
+            return true;
+
+        setTargetSurface(m_gestureDestination);
+        emit transitionStarted(m_gestureDestination);
+    }
+
+    const QPointF destination = m_layout->offsetForSurface(m_gestureDestination);
+    const double progress = progressForOffset(candidate, destination);
+    setGestureProgress(progress);
+    setOffset(destination * progress);
+    return true;
+}
+
+bool SpatialMotionController::endGesture(double velocityX, double velocityY, bool cancelled)
+{
+    if (!m_gestureActive)
+        return false;
+
+    const QString gestureDestination = m_gestureDestination;
+    const QPointF destination = m_layout->offsetForSurface(gestureDestination);
+    const QPointF velocity(velocityX, velocityY);
+
+    bool commit = false;
+    if (!cancelled && !gestureDestination.isEmpty()) {
+        const double normalizedVelocity = normalizedVelocityToward(velocity, destination);
+        commit = m_gestureProgress >= kGestureCommitProgress
+            || normalizedVelocity >= kGestureCommitVelocityPerSecond;
+    }
+
+    const QString settleDestination = commit ? gestureDestination : QStringLiteral("center");
+    const QPointF settleOffset = m_layout->offsetForSurface(settleDestination);
+
+    setTargetSurface(settleDestination);
+
+    m_animation.setDuration(m_durationMs);
+    m_animation.setStartValue(m_offset);
+    m_animation.setEndValue(settleOffset);
+    m_animation.start();
+
+    finishGestureTracking();
+    return true;
 }
 
 void SpatialMotionController::setOffset(const QPointF &offset)
@@ -146,7 +238,84 @@ void SpatialMotionController::setTargetSurface(const QString &surface)
     emit targetSurfaceChanged();
 }
 
+void SpatialMotionController::setGestureProgress(double progress)
+{
+    const double clamped = std::clamp(progress, 0.0, 1.0);
+    if (qFuzzyCompare(m_gestureProgress + 1.0, clamped + 1.0))
+        return;
+
+    m_gestureProgress = clamped;
+    emit gestureProgressChanged();
+}
+
+void SpatialMotionController::setGestureActive(bool active)
+{
+    if (m_gestureActive == active)
+        return;
+
+    m_gestureActive = active;
+    emit gestureActiveChanged();
+    emit runningChanged();
+}
+
 void SpatialMotionController::syncToCurrentSurface()
 {
     setOffset(m_layout->offsetForSurface(m_state->currentSurface()));
+}
+
+void SpatialMotionController::finishGestureTracking()
+{
+    m_gestureDestination.clear();
+    m_gestureStartOffset = {};
+    m_gestureAccumulated = {};
+    setGestureProgress(0.0);
+    setGestureActive(false);
+}
+
+QString SpatialMotionController::gestureDestinationFor(const QPointF &candidate) const
+{
+    const double absX = std::abs(candidate.x());
+    const double absY = std::abs(candidate.y());
+
+    if (std::max(absX, absY) < kGestureAxisLockDistance)
+        return {};
+
+    if (absX >= absY)
+        return candidate.x() >= 0.0 ? QStringLiteral("left") : QStringLiteral("right");
+
+    return candidate.y() >= 0.0 ? QStringLiteral("top") : QStringLiteral("dash");
+}
+
+double SpatialMotionController::progressForOffset(
+    const QPointF &offset, const QPointF &destination) const
+{
+    if (!qFuzzyIsNull(destination.x())) {
+        const double distance = std::abs(destination.x());
+        const double signedOffset = offset.x() * (destination.x() >= 0.0 ? 1.0 : -1.0);
+        return std::clamp(signedOffset / distance, 0.0, 1.0);
+    }
+
+    if (!qFuzzyIsNull(destination.y())) {
+        const double distance = std::abs(destination.y());
+        const double signedOffset = offset.y() * (destination.y() >= 0.0 ? 1.0 : -1.0);
+        return std::clamp(signedOffset / distance, 0.0, 1.0);
+    }
+
+    return 0.0;
+}
+
+double SpatialMotionController::normalizedVelocityToward(
+    const QPointF &velocity, const QPointF &destination) const
+{
+    if (!qFuzzyIsNull(destination.x())) {
+        const double signedVelocity = velocity.x() * (destination.x() >= 0.0 ? 1.0 : -1.0);
+        return signedVelocity / std::abs(destination.x());
+    }
+
+    if (!qFuzzyIsNull(destination.y())) {
+        const double signedVelocity = velocity.y() * (destination.y() >= 0.0 ? 1.0 : -1.0);
+        return signedVelocity / std::abs(destination.y());
+    }
+
+    return 0.0;
 }
