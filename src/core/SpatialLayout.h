@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QObject>
+#include <QMargins>
 #include <QPointF>
 #include <QSizeF>
 #include <QString>
@@ -30,6 +31,7 @@ public:
     [[nodiscard]] double centerHeight() const noexcept;
 
     Q_INVOKABLE QPointF offsetForSurface(const QString &surface) const;
+    Q_INVOKABLE QMargins returnShieldMargins(const QString &surface) const;
 
 signals:
     void geometryChanged();
