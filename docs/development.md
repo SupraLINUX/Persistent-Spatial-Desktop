@@ -128,3 +128,31 @@ bash tests/integration/probe-hyprland-plugin.sh
 The probe is intentionally not part of GitHub-hosted CI. Hyprland 0.53.3 uses Aquamarine 0.10, whose backend startup requires a DRM-backed allocator even for the headless output backend. Standard hosted GitHub containers do not expose `/dev/dri/renderD*`, so Hyprland aborts before its IPC sockets are created.
 
 This is an infrastructure limitation, not a plugin compile failure. The normal Ubuntu 26.04 CI still compiles both the shell and the ABI-sensitive plugin on every PR.
+
+## Live-session integration probe
+
+For the checks that genuinely require a running compositor, use the real-session probe from inside the Hyprland session under test:
+
+```bash
+bash tests/integration/probe-live-session.sh
+```
+
+Default paths are `build/psd-shell` and `build-hypr/src/compositor/hyprland-plugin/psd-hyprland-plugin.so`; both can be passed explicitly as the first and second arguments.
+
+The probe:
+
+- refuses to create a duplicate PSD shell if one is already mapped;
+- loads the PSD plugin only when needed and unloads only what it loaded;
+- validates protocol v3 capabilities;
+- launches `psd-shell` with experimental compositor sync enabled;
+- verifies one `psd-shell:<output>` layer surface for every active Hyprland monitor;
+- verifies the four-finger gesture arm/disarm dispatcher;
+- cleans up the shell and experimental gesture interception on exit.
+
+It does not move application windows by default. To include a small 24-logical-unit offset/reset smoke test on the focused monitor:
+
+```bash
+PSD_PROBE_EXERCISE_OFFSET=1 bash tests/integration/probe-live-session.sh
+```
+
+This probe is the preferred entry point before declaring the current compositor experiment valid on real hardware.
