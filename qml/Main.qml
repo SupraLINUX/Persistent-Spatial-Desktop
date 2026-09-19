@@ -8,7 +8,7 @@ Window {
     height: 800
     minimumWidth: 960
     minimumHeight: 600
-    visible: true
+    visible: false
     title: "Persistent Spatial Desktop"
     color: DesignTokens.value("colors.background.deep")
 
