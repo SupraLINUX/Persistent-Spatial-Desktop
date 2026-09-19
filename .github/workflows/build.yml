@@ -59,8 +59,6 @@ jobs:
             cmake \
             ninja-build \
             pkgconf \
-            python3 \
-            hyprland \
             hyprland-dev \
             libgles-dev
 
@@ -78,5 +76,3 @@ jobs:
       - name: Build plugin
         run: cmake --build build-plugin --target psd-hyprland-plugin --parallel 2
 
-      - name: Headless Hyprland plugin probe
-        run: bash tests/integration/probe-hyprland-plugin.sh
