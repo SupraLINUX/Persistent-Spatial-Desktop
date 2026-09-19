@@ -1,0 +1,49 @@
+#pragma once
+
+#include <QObject>
+#include <QHash>
+#include <QPointer>
+
+class DesignTokens;
+class HyprlandIpcBridge;
+class QQmlApplicationEngine;
+class QQmlContext;
+class QQuickWindow;
+class QScreen;
+class SpatialLayout;
+class SpatialMotionController;
+class SpatialState;
+
+class ShellWindowManager final : public QObject
+{
+    Q_OBJECT
+
+public:
+    ShellWindowManager(
+        QQmlApplicationEngine *engine,
+        DesignTokens *designTokens,
+        HyprlandIpcBridge *compositorBridge,
+        QObject *parent = nullptr);
+
+    void start();
+    [[nodiscard]] int windowCount() const noexcept;
+
+private:
+    struct Instance {
+        QPointer<QScreen> screen;
+        QPointer<QQmlContext> context;
+        QPointer<QQuickWindow> window;
+        QPointer<SpatialState> state;
+        QPointer<SpatialLayout> layout;
+        QPointer<SpatialMotionController> motion;
+    };
+
+    void createForScreen(QScreen *screen);
+    void destroyForScreen(QScreen *screen);
+    void configureLayerSurface(Instance *instance);
+
+    QQmlApplicationEngine *m_engine = nullptr;
+    DesignTokens *m_designTokens = nullptr;
+    HyprlandIpcBridge *m_compositorBridge = nullptr;
+    QHash<QScreen *, Instance *> m_instances;
+};
