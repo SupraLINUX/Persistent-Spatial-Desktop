@@ -221,6 +221,6 @@ void CoreTest::hyprlandWindowParsing()
     QVERIFY(window.value(QStringLiteral("floating")).toBool());
 }
 
-QTEST_APPLESS_MAIN(CoreTest)
+QTEST_GUILESS_MAIN(CoreTest)
 
 #include "tst_core.moc"
