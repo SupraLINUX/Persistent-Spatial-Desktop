@@ -3,7 +3,6 @@
 #include <hyprland/src/Compositor.hpp>
 #include <hyprland/src/SharedDefs.hpp>
 #include <hyprland/src/desktop/Workspace.hpp>
-#include <hyprland/src/desktop/state/FocusState.hpp>
 #include <hyprland/src/plugins/PluginAPI.hpp>
 #include <hyprland/src/render/Renderer.hpp>
 
@@ -38,15 +37,16 @@ void applyOffset(const PHLWORKSPACE &workspace, const PHLMONITOR &monitor, const
     g_pHyprRenderer->damageMonitor(monitor);
 }
 
-SDispatchResult activeWorkspaceForExperiment(PHLMONITOR &monitor, PHLWORKSPACE &workspace)
+SDispatchResult workspaceForMonitor(
+    const std::string &monitorName, PHLMONITOR &monitor, PHLWORKSPACE &workspace)
 {
-    monitor = Desktop::focusState()->monitor();
+    monitor = g_pCompositor->getMonitorFromName(monitorName);
     if (!monitor)
-        return {.success = false, .error = "PSD: no focused monitor"};
+        return {.success = false, .error = "PSD: unknown monitor " + monitorName};
 
     workspace = monitor->m_activeWorkspace;
     if (!workspace)
-        return {.success = false, .error = "PSD: focused monitor has no active workspace"};
+        return {.success = false, .error = "PSD: monitor has no active workspace"};
 
     if (workspace->m_isSpecialWorkspace)
         return {.success = false, .error = "PSD: special workspaces are excluded from the offset experiment"};
@@ -62,27 +62,35 @@ SDispatchResult setOffset(std::string arguments)
     std::replace(arguments.begin(), arguments.end(), ',', ' ');
 
     std::istringstream stream(arguments);
+    std::string monitorName;
     double x = 0.0;
     double y = 0.0;
     std::string trailing;
 
-    if (!(stream >> x >> y) || (stream >> trailing))
-        return {.success = false, .error = "PSD: expected exactly two numbers: <x> <y>"};
+    if (!(stream >> monitorName >> x >> y) || (stream >> trailing))
+        return {.success = false, .error = "PSD: expected <monitor> <x> <y>"};
 
     PHLMONITOR monitor;
     PHLWORKSPACE workspace;
-    if (const auto result = activeWorkspaceForExperiment(monitor, workspace); !result.success)
+    if (const auto result = workspaceForMonitor(monitorName, monitor, workspace); !result.success)
         return result;
 
     applyOffset(workspace, monitor, Vector2D{x, y});
     return {};
 }
 
-SDispatchResult resetOffset(std::string)
+SDispatchResult resetOffset(std::string arguments)
 {
+    std::istringstream stream(arguments);
+    std::string monitorName;
+    std::string trailing;
+
+    if (!(stream >> monitorName) || (stream >> trailing))
+        return {.success = false, .error = "PSD: expected <monitor>"};
+
     PHLMONITOR monitor;
     PHLWORKSPACE workspace;
-    if (const auto result = activeWorkspaceForExperiment(monitor, workspace); !result.success)
+    if (const auto result = workspaceForMonitor(monitorName, monitor, workspace); !result.success)
         return result;
 
     applyOffset(workspace, monitor, Vector2D{});
@@ -92,10 +100,10 @@ SDispatchResult resetOffset(std::string)
 std::string capabilitiesResponse(eHyprCtlOutputFormat format, std::string)
 {
     if (format == FORMAT_JSON) {
-        return R"json({"protocolVersion":1,"pluginVersion":"0.1.0","spatialRenderOffsetExperimental":true})json";
+        return R"json({"protocolVersion":2,"pluginVersion":"0.1.0","spatialRenderOffsetExperimental":true,"monitorTargeting":true})json";
     }
 
-    return "protocolVersion=1 pluginVersion=0.1.0 spatialRenderOffsetExperimental=true";
+    return "protocolVersion=2 pluginVersion=0.1.0 spatialRenderOffsetExperimental=true monitorTargeting=true";
 }
 
 void resetTouchedWorkspaces()
