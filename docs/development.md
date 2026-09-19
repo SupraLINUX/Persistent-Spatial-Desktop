@@ -75,6 +75,7 @@ It then connects to Hyprland's documented command and event UNIX sockets.
 - QML shell root;
 - persistent CENTER/LEFT/RIGHT/TOP/DASH object structure;
 - mouse gutter dwell navigation;
+- continuous 1:1 gesture progress in the C++ motion controller, including axis lock and distance/velocity snap decisions;
 - rigid translation between shell surfaces driven by a single C++ motion controller;
 - CENTER return semantics;
 - per-monitor transparent return shield preventing displaced apps from receiving the first click;
@@ -107,7 +108,7 @@ See `docs/compositor-bridge.md`.
 - production adoption of the experimental Hyprland render-offset mechanism;
 - real desktop icons/files;
 - notifications/control center/search providers;
-- touchpad 1:1 spatial gestures;
+- compositor/input feed for real four-finger touchpad gestures;
 - public D-Bus/IPC automation.
 
 Those are subsequent implementation milestones and must use the versioned contracts in `docs/` and `spec/`.
