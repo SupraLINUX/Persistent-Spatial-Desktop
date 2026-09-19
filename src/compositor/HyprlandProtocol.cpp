@@ -71,6 +71,55 @@ HyprlandProtocol::Event HyprlandProtocol::parseEventLine(const QByteArray &line)
     return event;
 }
 
+
+HyprlandProtocol::SpatialGestureBegin HyprlandProtocol::parseSpatialGestureBegin(const QString &payload)
+{
+    const QStringList parts = payload.split(QLatin1Char(','), Qt::KeepEmptyParts);
+    if (parts.size() != 2 || parts.at(0).isEmpty())
+        return {};
+
+    bool timeOk = false;
+    const quint32 timeMs = parts.at(1).toUInt(&timeOk);
+    if (!timeOk)
+        return {};
+
+    return {parts.at(0), timeMs, true};
+}
+
+HyprlandProtocol::SpatialGestureUpdate HyprlandProtocol::parseSpatialGestureUpdate(const QString &payload)
+{
+    const QStringList parts = payload.split(QLatin1Char(','), Qt::KeepEmptyParts);
+    if (parts.size() != 4 || parts.at(0).isEmpty())
+        return {};
+
+    bool xOk = false;
+    bool yOk = false;
+    bool timeOk = false;
+    const double deltaX = parts.at(1).toDouble(&xOk);
+    const double deltaY = parts.at(2).toDouble(&yOk);
+    const quint32 timeMs = parts.at(3).toUInt(&timeOk);
+    if (!xOk || !yOk || !timeOk)
+        return {};
+
+    return {parts.at(0), deltaX, deltaY, timeMs, true};
+}
+
+HyprlandProtocol::SpatialGestureEnd HyprlandProtocol::parseSpatialGestureEnd(const QString &payload)
+{
+    const QStringList parts = payload.split(QLatin1Char(','), Qt::KeepEmptyParts);
+    if (parts.size() != 3 || parts.at(0).isEmpty())
+        return {};
+
+    bool cancelledOk = false;
+    bool timeOk = false;
+    const int cancelledValue = parts.at(1).toInt(&cancelledOk);
+    const quint32 timeMs = parts.at(2).toUInt(&timeOk);
+    if (!cancelledOk || !timeOk || (cancelledValue != 0 && cancelledValue != 1))
+        return {};
+
+    return {parts.at(0), cancelledValue == 1, timeMs, true};
+}
+
 QVariantList HyprlandProtocol::parseMonitors(const QByteArray &json, QString *error)
 {
     const QJsonArray array = parseArray(json, error);
