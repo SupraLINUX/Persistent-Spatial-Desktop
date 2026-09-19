@@ -2,8 +2,6 @@
 #include "core/DesignTokens.h"
 #include "shell/ShellWindowManager.h"
 
-#include <LayerShellQt/shell.h>
-
 #include <QCoreApplication>
 #include <QGuiApplication>
 #include <QLoggingCategory>
@@ -12,8 +10,6 @@
 
 int main(int argc, char *argv[])
 {
-    LayerShellQt::Shell::useLayerShell();
-
     QGuiApplication application(argc, argv);
     QCoreApplication::setApplicationName(QStringLiteral("psd-shell"));
     QCoreApplication::setApplicationVersion(QStringLiteral("0.1.0"));
