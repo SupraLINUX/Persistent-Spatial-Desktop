@@ -32,6 +32,7 @@ HyprlandIpcBridge::HyprlandIpcBridge(QObject *parent)
     connect(&m_eventSocket, &QLocalSocket::readyRead, this, &HyprlandIpcBridge::handleEventData);
 
     connect(&m_eventSocket, &QLocalSocket::disconnected, this, [this] {
+        cancelSpatialGestures();
         setEventStreamConnected(false);
         setCapabilities({});
         if (available())
@@ -42,6 +43,7 @@ HyprlandIpcBridge::HyprlandIpcBridge(QObject *parent)
         if (error == QLocalSocket::PeerClosedError)
             return;
 
+        cancelSpatialGestures();
         setEventStreamConnected(false);
         setCapabilities({});
         setLastError(QStringLiteral("Hyprland event socket: %1").arg(m_eventSocket.errorString()));
@@ -101,6 +103,8 @@ void HyprlandIpcBridge::refreshCapabilities()
                             object.value(QStringLiteral("spatialRenderOffsetExperimental")).toBool());
         capabilities.insert(QStringLiteral("monitorTargeting"),
                             object.value(QStringLiteral("monitorTargeting")).toBool());
+        capabilities.insert(QStringLiteral("fourFingerGestureEventsExperimental"),
+                            object.value(QStringLiteral("fourFingerGestureEventsExperimental")).toBool());
         setCapabilities(std::move(capabilities));
     }, false);
 }
@@ -217,6 +221,50 @@ void HyprlandIpcBridge::handleEventLine(const QByteArray &line)
 
     emit compositorEvent(event.name, event.payload);
 
+    if (event.name == QStringLiteral("psdgesturebegin")) {
+        const auto gesture = HyprlandProtocol::parseSpatialGestureBegin(event.payload);
+        if (!gesture.valid)
+            return;
+
+        m_gestureSamples.insert(gesture.monitorName, GestureSample{gesture.timeMs, {}});
+        emit experimentalSpatialGestureBegin(gesture.monitorName);
+        return;
+    }
+
+    if (event.name == QStringLiteral("psdgestureupdate")) {
+        const auto gesture = HyprlandProtocol::parseSpatialGestureUpdate(event.payload);
+        if (!gesture.valid)
+            return;
+
+        GestureSample &sample = m_gestureSamples[gesture.monitorName];
+        if (sample.timeMs != 0) {
+            const quint32 elapsedMs = gesture.timeMs - sample.timeMs;
+            if (elapsedMs > 0 && elapsedMs <= 250) {
+                const QPointF instantaneous(
+                    gesture.deltaX * 1000.0 / static_cast<double>(elapsedMs),
+                    gesture.deltaY * 1000.0 / static_cast<double>(elapsedMs));
+                sample.velocity = sample.velocity.isNull()
+                    ? instantaneous
+                    : (sample.velocity * 0.35) + (instantaneous * 0.65);
+            }
+        }
+        sample.timeMs = gesture.timeMs;
+
+        emit experimentalSpatialGestureUpdate(
+            gesture.monitorName, gesture.deltaX, gesture.deltaY);
+        return;
+    }
+
+    if (event.name == QStringLiteral("psdgestureend")) {
+        const auto gesture = HyprlandProtocol::parseSpatialGestureEnd(event.payload);
+        if (!gesture.valid)
+            return;
+
+        const GestureSample sample = m_gestureSamples.take(gesture.monitorName);
+        emit experimentalSpatialGestureEnd(
+            gesture.monitorName, sample.velocity.x(), sample.velocity.y(), gesture.cancelled);
+        return;
+    }
     if (event.name.startsWith(QStringLiteral("monitor"))
         || event.name.startsWith(QStringLiteral("focusedmon"))) {
         scheduleRefresh(RefreshMonitors | RefreshWorkspaces);
@@ -392,6 +440,16 @@ void HyprlandIpcBridge::requestJson(
     });
 
     socket->connectToServer(m_commandSocketPath, QIODevice::ReadWrite);
+}
+
+
+void HyprlandIpcBridge::cancelSpatialGestures()
+{
+    const auto monitorNames = m_gestureSamples.keys();
+    m_gestureSamples.clear();
+
+    for (const QString &monitorName : monitorNames)
+        emit experimentalSpatialGestureEnd(monitorName, 0.0, 0.0, true);
 }
 
 void HyprlandIpcBridge::requestText(const QByteArray &request, ResponseCallback callback)
