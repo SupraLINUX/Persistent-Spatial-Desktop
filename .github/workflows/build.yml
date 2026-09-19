@@ -2,6 +2,8 @@ name: build
 
 on:
   push:
+    branches:
+      - main
   pull_request:
 
 jobs:
@@ -11,10 +13,10 @@ jobs:
       image: ubuntu:26.04
 
     steps:
-      - name: Install bootstrap dependencies
+      - name: Install shell build dependencies
         run: |
           apt-get update
-          DEBIAN_FRONTEND=noninteractive apt-get install -y \
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
             git \
             ca-certificates \
             build-essential \
@@ -46,17 +48,13 @@ jobs:
       - name: Install plugin build dependencies
         run: |
           apt-get update
-          DEBIAN_FRONTEND=noninteractive apt-get install -y \
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
             git \
             ca-certificates \
             build-essential \
             cmake \
             ninja-build \
             pkgconf \
-            qt6-base-dev \
-            qt6-declarative-dev \
-            qt6-wayland \
-            liblayershellqtinterface-dev \
             hyprland-dev \
             libgles-dev
 
@@ -67,6 +65,7 @@ jobs:
         run: >-
           cmake -S . -B build-plugin -G Ninja
           -DCMAKE_BUILD_TYPE=Debug
+          -DPSD_BUILD_SHELL=OFF
           -DPSD_BUILD_HYPRLAND_PLUGIN=ON
           -DBUILD_TESTING=OFF
 
