@@ -18,10 +18,10 @@ This makes it a useful low-level proof-of-concept target for PSD.
 
 The optional build target `psd-hyprland-plugin` registers two internal dispatchers:
 
-- `plugin:psd:offset <x> <y>`
-- `plugin:psd:reset`
+- `plugin:psd:offset <monitor> <x> <y>`
+- `plugin:psd:reset <monitor>`
 
-The offset command applies a render offset to the active regular workspace of the focused monitor and damages that monitor.
+The offset command applies a render offset to the active regular workspace of the explicitly named monitor and damages only that monitor.
 
 The experiment refuses:
 
@@ -36,7 +36,7 @@ Plugin unload resets every workspace touched by this experiment.
 The plugin is intentionally opt-in because Hyprland plugins are ABI-sensitive.
 
 ```bash
-sudo apt install hyprland-dev pkgconf
+sudo apt install hyprland-dev pkgconf libgles-dev
 cmake -S . -B build-hypr -G Ninja \
   -DPSD_BUILD_HYPRLAND_PLUGIN=ON \
   -DBUILD_TESTING=OFF
@@ -56,10 +56,24 @@ Only run this inside the matching Hyprland build/session.
 After loading the plugin, examples are:
 
 ```bash
-hyprctl dispatch plugin:psd:offset '160 0'
-hyprctl dispatch plugin:psd:offset '0 120'
-hyprctl dispatch plugin:psd:reset
+hyprctl dispatch plugin:psd:offset 'DP-1 160 0'
+hyprctl dispatch plugin:psd:offset 'DP-1 0 120'
+hyprctl dispatch plugin:psd:reset 'DP-1'
 ```
+
+## Runtime-driven experiment
+
+When the shell is started with:
+
+```bash
+PSD_EXPERIMENTAL_HYPRLAND_SYNC=1 ./build/psd-shell
+```
+
+each monitor-local `SpatialMotionController` may stream its current render offset to the matching Hyprland output, but only when the PSD plugin capability handshake succeeds.
+
+The bridge applies backpressure: there is at most one command in flight per monitor and intermediate offsets are coalesced to the latest value. No polling is introduced.
+
+This mode is intentionally opt-in until input/hit-testing and compositor behavior are validated.
 
 ## What success proves
 
