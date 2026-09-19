@@ -76,6 +76,24 @@ The bridge applies backpressure: there is at most one command in flight per moni
 
 This mode is intentionally opt-in until input/hit-testing and compositor behavior are validated.
 
+## Input finding
+
+Hyprland 0.53.3 does not include `CWorkspace::m_renderOffset` in its normal window hit-test geometry. `CWindow::getWindowBoxUnified()` is based on the window's logical/real position and size, and `CCompositor::vectorToWindowUnified()` uses that geometry for pointer targeting.
+
+That means the experiment is a render transform, not an input transform.
+
+PSD's closed UX contract does not require displaced application windows to remain directly clickable: while a spatial surface is revealed, clicking the still-visible part of CENTER must first return to CENTER and must not be forwarded to the application below.
+
+The bootstrap therefore uses a transparent per-monitor LayerTop return shield:
+
+- full-monitor while a spatial transition is running;
+- restricted to only the visible CENTER region after LEFT/RIGHT/TOP/DASH settles;
+- hidden in CENTER;
+- keyboard non-interactive;
+- first pointer press is consumed and triggers `spatial.center`.
+
+This preserves the product input rule without adding invasive Hyprland input hooks. The revealed PSD surface remains outside the shield and stays interactive.
+
 ## What success proves
 
 Success proves only that Hyprland can render the current workspace's normal windows at a PSD-controlled offset as a coherent unit.
