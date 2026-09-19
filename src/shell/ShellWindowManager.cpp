@@ -135,11 +135,12 @@ void ShellWindowManager::configureLayerSurface(Instance *instance)
     layerWindow->setScope(QStringLiteral("psd-shell:%1").arg(instance->screen->name()));
     layerWindow->setScreen(instance->screen);
     layerWindow->setLayer(LayerShellQt::Window::LayerBackground);
-    layerWindow->setAnchors(
-        LayerShellQt::Window::AnchorTop
-        | LayerShellQt::Window::AnchorBottom
-        | LayerShellQt::Window::AnchorLeft
-        | LayerShellQt::Window::AnchorRight);
+    LayerShellQt::Window::Anchors anchors;
+    anchors |= LayerShellQt::Window::AnchorTop;
+    anchors |= LayerShellQt::Window::AnchorBottom;
+    anchors |= LayerShellQt::Window::AnchorLeft;
+    anchors |= LayerShellQt::Window::AnchorRight;
+    layerWindow->setAnchors(anchors);
     layerWindow->setExclusiveZone(-1);
     layerWindow->setKeyboardInteractivity(
         LayerShellQt::Window::KeyboardInteractivityOnDemand);
