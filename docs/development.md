@@ -146,9 +146,11 @@ The probe:
 - loads the PSD plugin only when needed and unloads only what it loaded;
 - validates protocol v3 capabilities;
 - launches `psd-shell` with experimental compositor sync enabled;
-- verifies one `psd-shell:<output>` layer surface for every active Hyprland monitor;
+- verifies exactly one `psd-shell:<output>` layer surface for every active Hyprland monitor;
+- verifies the shell starts in CENTER with every `psd-return-shield:<output>` surface unmapped;
 - verifies the four-finger gesture arm/disarm dispatcher;
-- cleans up the shell and experimental gesture interception on exit.
+- cleans up the shell and experimental gesture interception on exit;
+- resets the experimental render offset on every active monitor before finishing, even when the plugin was already loaded by the session.
 
 It does not move application windows by default. To include a small 24-logical-unit offset/reset smoke test on the focused monitor:
 
