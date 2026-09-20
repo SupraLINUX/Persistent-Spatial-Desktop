@@ -913,7 +913,10 @@ PY
             echo "PSD live probe: shell did not return cleanly to CENTER after fullscreen exit." >&2
             hyprctl -j clients >&2 || true
             hyprctl -j layers >&2 || true
+            hyprctl -j cursorpos >&2 || true
+            hyprctl -j monitors >&2 || true
             plugin_state >&2 || true
+            cat "$log_file" >&2 || true
             exit 1
         fi
 
@@ -950,15 +953,23 @@ PY
     fi
 
     if [[ "${PSD_PROBE_EXERCISE_PLUGIN_LIFECYCLE:-0}" == "1" ]]; then
-        # Move only after Hyprland has removed the former fullscreen client.
-        # Otherwise the one cursor transition can still be delivered to that
-        # dying surface instead of the remapped PSD gutter.
-        hyprctl dispatch movecursor "$runtime_center_x $runtime_center_y" | grep -qx "ok"
-        sleep 0.1
-        hyprctl dispatch movecursor "$runtime_edge_x $runtime_edge_y" | grep -qx "ok"
-
+        # hyprctl movecursor is a synthetic warp, not a physical motion stream.
+        # After fullscreen/workspace teardown a single warp can miss pointer
+        # enter delivery even though the layer surface is mapped correctly.
+        # Drive a few complete center -> gutter entries with real dwell time,
+        # refocusing the target monitor before each attempt.
         lifecycle_displaced=0
-        for _ in $(seq 1 50); do
+        for attempt in $(seq 1 4); do
+            hyprctl dispatch focusmonitor "$primary_monitor" | grep -qx "ok"
+            hyprctl dispatch movecursor "$runtime_center_x $runtime_center_y" | grep -qx "ok"
+            sleep 0.12
+            hyprctl dispatch movecursor "$runtime_edge_x $runtime_edge_y" | grep -qx "ok"
+
+            # The configured gutter dwell is ~180 ms. Leave enough time for
+            # dwell plus initial animation frames, then inspect real compositor
+            # state before attempting another synthetic entry.
+            sleep 0.32
+
             layers_json="$(hyprctl -j layers)"
             state_json="$(plugin_state)"
 
@@ -988,7 +999,8 @@ PY
                 lifecycle_displaced=1
                 break
             fi
-            sleep 0.1
+
+            echo "PSD live probe: post-fullscreen synthetic gutter entry attempt $attempt did not trigger; retrying" >&2
         done
 
         if [[ "$lifecycle_displaced" != "1" ]]; then
