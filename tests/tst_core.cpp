@@ -10,6 +10,7 @@
 #include <QVariantMap>
 #include <QtTest>
 
+#include <algorithm>
 
 class TestCompositorBridge final : public CompositorBridge
 {
