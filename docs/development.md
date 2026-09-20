@@ -158,4 +158,6 @@ It does not move application windows by default. To include a small 24-logical-u
 PSD_PROBE_EXERCISE_OFFSET=1 bash tests/integration/probe-live-session.sh
 ```
 
+GitHub-hosted CI also runs `tests/integration/test-probe-live-session-mock.sh`. That test uses a fake `hyprctl` and fake shell process only to validate the probe's control flow, cleanup ownership, CENTER-layer expectations and error handling. It is not compositor validation and does not replace the real-session probe.
+
 This probe is the preferred entry point before declaring the current compositor experiment valid on real hardware.
