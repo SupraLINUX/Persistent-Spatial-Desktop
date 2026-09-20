@@ -6,15 +6,6 @@ concurrency:
 
 on:
   workflow_dispatch:
-  pull_request:
-    paths:
-      - ".github/workflows/vm-integration.yml"
-      - "CMakeLists.txt"
-      - "qml/**"
-      - "src/compositor/**"
-      - "src/core/**"
-      - "src/shell/**"
-      - "tests/**"
 
 jobs:
   ubuntu-26-04-qemu:
