@@ -63,13 +63,35 @@ reset_all_monitor_offsets() {
         return
     fi
 
+    local state_json='{"trackedTransforms":[]}'
+    local monitors_json='[]'
+
+    state_json="$(hyprctl -j psd-plugin-state 2>/dev/null || printf '%s' "$state_json")"
+    monitors_json="$(hyprctl -j monitors 2>/dev/null || printf '%s' "$monitors_json")"
+
     while IFS= read -r monitor_name; do
         [[ -n "$monitor_name" ]] || continue
         hyprctl dispatch plugin:psd:reset "$monitor_name" >/dev/null 2>&1 || true
     done < <(
-        hyprctl -j monitors 2>/dev/null \
-            | python3 -c 'import json,sys; [print(m["name"]) for m in json.load(sys.stdin) if m.get("name")]' \
-            2>/dev/null
+        python3 - "$state_json" "$monitors_json" <<'PY'
+import json
+import sys
+
+state = json.loads(sys.argv[1])
+monitors = json.loads(sys.argv[2])
+
+names = {
+    str(item.get("monitor", "")).strip()
+    for item in state.get("trackedTransforms", [])
+}
+names.update(
+    str(item.get("name", "")).strip()
+    for item in monitors
+)
+
+for name in sorted(name for name in names if name):
+    print(name)
+PY
     )
 }
 
