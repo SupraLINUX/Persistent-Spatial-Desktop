@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <any>
 #include <cstdint>
+#include <cmath>
 #include <format>
 #include <sstream>
 #include <stdexcept>
@@ -166,6 +167,9 @@ SDispatchResult setOffset(std::string arguments)
 
     if (!(stream >> monitorName >> x >> y) || (stream >> trailing))
         return {.success = false, .error = "PSD: expected <monitor> <x> <y>"};
+
+    if (!std::isfinite(x) || !std::isfinite(y))
+        return {.success = false, .error = "PSD: offset coordinates must be finite"};
 
     PHLMONITOR monitor;
     PHLWORKSPACE workspace;
