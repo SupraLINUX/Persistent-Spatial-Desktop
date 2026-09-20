@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <any>
+#include <cstdint>
 #include <format>
 #include <sstream>
 #include <stdexcept>
@@ -20,17 +21,67 @@
 
 namespace {
 
+struct MonitorTransformState
+{
+    PHLWORKSPACEREF workspace;
+    Vector2D offset;
+    uint64_t workspaceGeneration = 0;
+};
+
 HANDLE g_handle = nullptr;
 SP<SHyprCtlCommand> g_capabilitiesCommand;
+SP<SHyprCtlCommand> g_stateCommand;
 SP<HOOK_CALLBACK_FN> g_swipeBeginCallback;
 SP<HOOK_CALLBACK_FN> g_swipeUpdateCallback;
 SP<HOOK_CALLBACK_FN> g_swipeEndCallback;
 std::vector<PHLWORKSPACEREF> g_touchedWorkspaces;
-std::unordered_map<std::string, PHLWORKSPACEREF> g_monitorWorkspaces;
+std::unordered_map<std::string, MonitorTransformState> g_monitorTransforms;
 
 bool g_gestureEventsEnabled = false;
 bool g_spatialGestureActive = false;
 std::string g_spatialGestureMonitor;
+uint64_t g_nextWorkspaceGeneration = 1;
+uint64_t g_workspaceSwitchResetCount = 0;
+
+std::string jsonEscape(const std::string &value)
+{
+    std::string result;
+    result.reserve(value.size());
+
+    for (const unsigned char ch : value) {
+        switch (ch) {
+        case '"':
+            result += R"(\")";
+            break;
+        case '\\':
+            result += R"(\\)";
+            break;
+        case '\b':
+            result += R"(\b)";
+            break;
+        case '\f':
+            result += R"(\f)";
+            break;
+        case '\n':
+            result += R"(\n)";
+            break;
+        case '\r':
+            result += R"(\r)";
+            break;
+        case '\t':
+            result += R"(\t)";
+            break;
+        default:
+            if (ch < 0x20)
+                result += std::format(R"(\u{:04x})", ch);
+            else
+                result += static_cast<char>(ch);
+            break;
+        }
+    }
+
+    return result;
+}
 
 void rememberWorkspace(const PHLWORKSPACE &workspace)
 {
@@ -57,23 +108,33 @@ void applyOffset(const PHLWORKSPACE &workspace, const Vector2D &offset)
         g_pHyprRenderer->damageMonitor(monitor);
 }
 
-void trackWorkspaceForMonitor(const std::string &monitorName, const PHLWORKSPACE &workspace)
+MonitorTransformState &trackWorkspaceForMonitor(
+    const std::string &monitorName, const PHLWORKSPACE &workspace)
 {
-    if (const auto existing = g_monitorWorkspaces.find(monitorName);
-        existing != g_monitorWorkspaces.end()) {
-        const auto previousWorkspace = existing->second.lock();
-        if (previousWorkspace && previousWorkspace != workspace)
+    auto [it, inserted] = g_monitorTransforms.try_emplace(monitorName);
+    MonitorTransformState &state = it->second;
+    const auto previousWorkspace = state.workspace.lock();
+
+    if (inserted || previousWorkspace != workspace) {
+        if (previousWorkspace) {
             applyOffset(previousWorkspace, Vector2D{});
+            ++g_workspaceSwitchResetCount;
+        }
+
+        for (auto other = g_monitorTransforms.begin(); other != g_monitorTransforms.end();) {
+            if (other->first != monitorName && other->second.workspace.lock() == workspace)
+                other = g_monitorTransforms.erase(other);
+            else
+                ++other;
+        }
+
+        state.workspace = workspace;
+        state.workspaceGeneration = g_nextWorkspaceGeneration++;
+        if (g_nextWorkspaceGeneration == 0)
+            g_nextWorkspaceGeneration = 1;
     }
 
-    for (auto it = g_monitorWorkspaces.begin(); it != g_monitorWorkspaces.end();) {
-        if (it->first != monitorName && it->second.lock() == workspace)
-            it = g_monitorWorkspaces.erase(it);
-        else
-            ++it;
-    }
-
-    g_monitorWorkspaces[monitorName] = workspace;
+    return state;
 }
 
 SDispatchResult workspaceForMonitor(
@@ -114,8 +175,9 @@ SDispatchResult setOffset(std::string arguments)
     if (workspace->m_hasFullscreenWindow)
         return {.success = false, .error = "PSD: refusing non-zero render offset while the workspace contains fullscreen content"};
 
-    trackWorkspaceForMonitor(monitorName, workspace);
-    applyOffset(workspace, Vector2D{x, y});
+    MonitorTransformState &state = trackWorkspaceForMonitor(monitorName, workspace);
+    state.offset = Vector2D{x, y};
+    applyOffset(workspace, state.offset);
     return {};
 }
 
@@ -128,12 +190,12 @@ SDispatchResult resetOffset(std::string arguments)
     if (!(stream >> monitorName) || (stream >> trailing))
         return {.success = false, .error = "PSD: expected <monitor>"};
 
-    const auto tracked = g_monitorWorkspaces.find(monitorName);
-    if (tracked == g_monitorWorkspaces.end())
+    const auto tracked = g_monitorTransforms.find(monitorName);
+    if (tracked == g_monitorTransforms.end())
         return {};
 
-    const auto workspace = tracked->second.lock();
-    g_monitorWorkspaces.erase(tracked);
+    const auto workspace = tracked->second.workspace.lock();
+    g_monitorTransforms.erase(tracked);
 
     if (workspace)
         applyOffset(workspace, Vector2D{});
@@ -245,10 +307,47 @@ void onSwipeEnd(void *, SCallbackInfo &info, std::any parameter)
 std::string capabilitiesResponse(eHyprCtlOutputFormat format, std::string)
 {
     if (format == FORMAT_JSON) {
-        return R"json({"protocolVersion":3,"pluginVersion":"0.1.0","spatialRenderOffsetExperimental":true,"monitorTargeting":true,"fourFingerGestureEventsExperimental":true,"gestureEventsDefaultEnabled":false})json";
+        return R"json({"protocolVersion":3,"pluginVersion":"0.1.0","spatialRenderOffsetExperimental":true,"monitorTargeting":true,"fourFingerGestureEventsExperimental":true,"gestureEventsDefaultEnabled":false,"diagnosticStateQueryExperimental":true})json";
     }
 
-    return "protocolVersion=3 pluginVersion=0.1.0 spatialRenderOffsetExperimental=true monitorTargeting=true fourFingerGestureEventsExperimental=true gestureEventsDefaultEnabled=false";
+    return "protocolVersion=3 pluginVersion=0.1.0 spatialRenderOffsetExperimental=true monitorTargeting=true fourFingerGestureEventsExperimental=true gestureEventsDefaultEnabled=false diagnosticStateQueryExperimental=true";
+}
+
+std::string stateResponse(eHyprCtlOutputFormat format, std::string)
+{
+    if (format != FORMAT_JSON) {
+        return std::format(
+            "trackedTransforms={} touchedWorkspaces={} workspaceSwitchResetCount={} gestureEventsEnabled={} gestureActive={}",
+            g_monitorTransforms.size(),
+            g_touchedWorkspaces.size(),
+            g_workspaceSwitchResetCount,
+            g_gestureEventsEnabled ? "true" : "false",
+            g_spatialGestureActive ? "true" : "false");
+    }
+
+    std::string transforms;
+    bool first = true;
+
+    for (const auto &[monitorName, state] : g_monitorTransforms) {
+        if (!first)
+            transforms += ',';
+        first = false;
+
+        transforms += std::format(
+            R"json({{"monitor":"{}","workspaceGeneration":{},"x":{:.6f},"y":{:.6f}}})json",
+            jsonEscape(monitorName),
+            state.workspaceGeneration,
+            state.offset.x,
+            state.offset.y);
+    }
+
+    return std::format(
+        R"json({{"trackedTransforms":[{}],"touchedWorkspaceCount":{},"workspaceSwitchResetCount":{},"gestureEventsEnabled":{},"gestureActive":{}}})json",
+        transforms,
+        g_touchedWorkspaces.size(),
+        g_workspaceSwitchResetCount,
+        g_gestureEventsEnabled ? "true" : "false",
+        g_spatialGestureActive ? "true" : "false");
 }
 
 void resetTouchedWorkspaces()
@@ -259,7 +358,7 @@ void resetTouchedWorkspaces()
             applyOffset(workspace, Vector2D{});
     }
 
-    g_monitorWorkspaces.clear();
+    g_monitorTransforms.clear();
     g_touchedWorkspaces.clear();
 }
 
@@ -295,6 +394,14 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle)
             .fn = capabilitiesResponse,
         });
 
+    g_stateCommand = HyprlandAPI::registerHyprCtlCommand(
+        g_handle,
+        SHyprCtlCommand{
+            .name = "psd-plugin-state",
+            .exact = true,
+            .fn = stateResponse,
+        });
+
     g_swipeBeginCallback = HyprlandAPI::registerCallbackDynamic(
         g_handle, "swipeBegin", onSwipeBegin);
     g_swipeUpdateCallback = HyprlandAPI::registerCallbackDynamic(
@@ -304,6 +411,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle)
 
     success = success
         && static_cast<bool>(g_capabilitiesCommand)
+        && static_cast<bool>(g_stateCommand)
         && static_cast<bool>(g_swipeBeginCallback)
         && static_cast<bool>(g_swipeUpdateCallback)
         && static_cast<bool>(g_swipeEndCallback);
@@ -332,11 +440,14 @@ APICALL EXPORT void PLUGIN_EXIT()
     if (g_handle) {
         if (g_capabilitiesCommand)
             HyprlandAPI::unregisterHyprCtlCommand(g_handle, g_capabilitiesCommand);
+        if (g_stateCommand)
+            HyprlandAPI::unregisterHyprCtlCommand(g_handle, g_stateCommand);
         HyprlandAPI::removeDispatcher(g_handle, "plugin:psd:offset");
         HyprlandAPI::removeDispatcher(g_handle, "plugin:psd:reset");
         HyprlandAPI::removeDispatcher(g_handle, "plugin:psd:gesture-events");
     }
 
     g_capabilitiesCommand.reset();
+    g_stateCommand.reset();
     g_handle = nullptr;
 }
