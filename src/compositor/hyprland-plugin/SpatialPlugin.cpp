@@ -448,8 +448,32 @@ std::string stateResponse(eHyprCtlOutputFormat format, std::string)
             state.offset.y);
     }
 
+    std::string floatingOffsets;
+    first = true;
+
+    for (const auto &[monitorName, state] : g_monitorTransforms) {
+        for (const FloatingWindowTransform &tracked : state.floatingWindows) {
+            const auto window = tracked.window.lock();
+            if (!window)
+                continue;
+
+            if (!first)
+                floatingOffsets += ',';
+            first = false;
+
+            floatingOffsets += std::format(
+                R"json({{"monitor":"{}","pinned":{},"appliedX":{:.6f},"appliedY":{:.6f},"currentX":{:.6f},"currentY":{:.6f}}})json",
+                jsonEscape(monitorName),
+                window->m_pinned ? "true" : "false",
+                tracked.appliedOffset.x,
+                tracked.appliedOffset.y,
+                window->m_floatingOffset.x,
+                window->m_floatingOffset.y);
+        }
+    }
+
     return std::format(
-        R"json({{"trackedTransforms":[{}],"touchedWorkspaceCount":{},"trackedFloatingWindowCount":{},"workspaceSwitchResetCount":{},"gestureEventsEnabled":{},"gestureActive":{}}})json",
+        R"json({{"trackedTransforms":[{}],"touchedWorkspaceCount":{},"trackedFloatingWindowCount":{},"floatingOffsets":[{}],"workspaceSwitchResetCount":{},"gestureEventsEnabled":{},"gestureActive":{}}})json",
         transforms,
         g_touchedWorkspaces.size(),
         std::accumulate(
@@ -459,6 +483,7 @@ std::string stateResponse(eHyprCtlOutputFormat format, std::string)
             [](size_t count, const auto &entry) {
                 return count + entry.second.floatingWindows.size();
             }),
+        floatingOffsets,
         g_workspaceSwitchResetCount,
         g_gestureEventsEnabled ? "true" : "false",
         g_spatialGestureActive ? "true" : "false");

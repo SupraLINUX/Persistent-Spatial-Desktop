@@ -374,6 +374,41 @@ PY
     hyprctl dispatch plugin:psd:offset "$monitor_name $logical_offset 0" | grep -qx "ok"
     sleep 0.2
 
+    if [[ "$mode" != "tiled" ]]; then
+        local floating_state
+        floating_state="$(hyprctl -j psd-plugin-state)"
+
+        python3 - "$floating_state" "$mode" "$logical_offset" <<'PY'
+import json
+import sys
+
+state = json.loads(sys.argv[1])
+mode = sys.argv[2]
+expected = float(sys.argv[3])
+entries = state.get("floatingOffsets", [])
+
+if not entries:
+    raise SystemExit(
+        f"PSD render probe: {mode} was not tracked as a floating render target; "
+        f"state={state}"
+    )
+
+entry = entries[0]
+print(
+    "PSD render probe: "
+    f"{mode} floating diagnostic "
+    f"applied=({entry.get('appliedX')},{entry.get('appliedY')}) "
+    f"current=({entry.get('currentX')},{entry.get('currentY')}) "
+    f"pinned={entry.get('pinned')}"
+)
+
+if abs(float(entry.get("appliedX", 0.0)) - expected) > 0.01:
+    raise SystemExit(
+        f"PSD render probe: {mode} tracked wrong applied offset: {entry}"
+    )
+PY
+    fi
+
     local geometry_shifted
     geometry_shifted="$(client_geometry "$target_title")"
     if [[ "$geometry_shifted" != "$geometry_before" ]]; then
