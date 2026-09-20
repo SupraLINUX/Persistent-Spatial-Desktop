@@ -256,11 +256,17 @@ ssh_guest '
     sudo systemctl stop psd-seatd.service >/dev/null 2>&1 || true
     sudo rm -f /run/seatd.sock
 
+    seatd_path="$(command -v seatd)"
+    if [[ -z "$seatd_path" ]]; then
+        echo "PSD QEMU probe: seatd executable not found after package install" >&2
+        exit 1
+    fi
+
     sudo systemd-run \
         --unit=psd-seatd \
         --collect \
         --property=Environment=SEATD_VTBOUND=0 \
-        /usr/bin/seatd -g video -l debug >/dev/null
+        "$seatd_path" -g video -l debug >/dev/null
 
     seatd_ready=0
     for _ in $(seq 1 100); do
