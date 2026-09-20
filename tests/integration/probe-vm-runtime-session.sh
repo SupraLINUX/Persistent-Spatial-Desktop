@@ -161,6 +161,14 @@ if [[ "${PSD_PROBE_USE_NATIVE_BACKEND:-0}" == "1" ]]; then
     echo "PSD VM runtime probe: shell Wayland socket $WAYLAND_DISPLAY"
 fi
 
+test_client_path="${PSD_PROBE_TEST_CLIENT:-build/tests/psd-integration-client}"
+if [[ ! -x "$test_client_path" ]]; then
+    echo "PSD VM runtime probe: integration test client not found: $test_client_path" >&2
+    exit 1
+fi
+
+PSD_PROBE_TEST_CLIENT="$test_client_path" \
+PSD_PROBE_EXERCISE_HOTPLUG=1 \
 PSD_PROBE_EXERCISE_RUNTIME=1 \
     bash "$(dirname "$0")/probe-live-session.sh" "$SHELL_PATH" "$PLUGIN_PATH"
 

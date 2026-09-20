@@ -92,7 +92,9 @@ It then connects to Hyprland's documented command and event UNIX sockets.
 - experimental `j/psd-plugin-state` diagnostics for integration probes without exposing Hyprland internals as a PSD API;
 - event-coalesced state refreshes;
 - no compositor polling loop;
-- unit tests for tokens, spatial state, responsive geometry, motion authority, Hyprland protocol parsing and compositor reset sequencing.
+- unit tests for tokens, spatial state, responsive geometry, motion authority, Hyprland protocol parsing and compositor reset sequencing;
+- GitHub-hosted Ubuntu 26.04 KVM/QEMU integration with guest DRM/KMS, seatd, Hyprland, the real Qt/Wayland shell and compositor plugin;
+- deterministic Qt/Wayland integration client used to keep workspaces alive and request fullscreen during compositor lifecycle validation.
 
 ## Current compositor boundary
 
@@ -120,20 +122,24 @@ See `docs/compositor-bridge.md`.
 
 Those are subsequent implementation milestones and must use the versioned contracts in `docs/` and `spec/`.
 
-## Headless compositor integration probe
+## GitHub-hosted compositor integration
 
-`tests/integration/probe-hyprland-plugin.sh` can launch Hyprland with its headless output backend, load the PSD plugin, validate the JSON capability handshake, and exercise monitor-scoped offset/reset.
+GitHub-hosted containers still do not expose a useful DRM render node directly, but PSD no longer treats that as a blocker.
 
-Run it on a Linux machine with a DRM render node:
+The `ubuntu-26-04-qemu` CI job boots the pinned Ubuntu Minimal 26.04 release inside QEMU/KVM. The guest receives a Virtio DRM/KMS device and runs:
 
-```bash
-sudo apt install hyprland python3
-bash tests/integration/probe-hyprland-plugin.sh
-```
+- Ubuntu 26.04.1 userspace;
+- `seatd` for compositor ownership of the virtual DRM seat;
+- Hyprland 0.53.x on the guest's native Virtio DRM/KMS output;
+- the ABI-sensitive PSD Hyprland plugin;
+- the real `psd-shell` over Qt Wayland;
+- the live compositor lifecycle probe.
 
-The probe is intentionally not part of GitHub-hosted CI. Hyprland 0.53.3 uses Aquamarine 0.10, whose backend startup requires a DRM-backed allocator even for the headless output backend. Standard hosted GitHub containers do not expose `/dev/dri/renderD*`, so Hyprland aborts before its IPC sockets are created.
+The image URL is release-dated rather than `current`, and the harness verifies the cached/downloaded QCOW2 against Canonical's `SHA256SUMS` before booting it.
 
-This is an infrastructure limitation, not a plugin compile failure. The normal Ubuntu 26.04 CI still compiles both the shell and the ABI-sensitive plugin on every PR.
+The VM validates compositor semantics and lifecycle. It does **not** validate physical-device properties such as touchpad feel, NVIDIA-specific behavior, direct-scanout performance, VRR, real mixed-DPI displays or perceptual latency.
+
+`tests/integration/probe-hyprland-plugin.sh` remains useful independently on any Linux machine exposing a DRM render node. The manual `.github/workflows/vm-integration.yml` workflow runs the same QEMU harness on demand.
 
 ## Live-session integration probe
 
@@ -173,16 +179,20 @@ PSD_PROBE_EXERCISE_RUNTIME=1 bash tests/integration/probe-live-session.sh
 That opt-in mode uses the real shell input path rather than a test-only shell API. On the focused monitor it:
 
 1. records the current workspace and cursor position;
-2. switches to a temporary empty named workspace;
-3. moves the Hyprland cursor into the LEFT gutter and waits for the real ~180 ms dwell navigation;
-4. requires the return shield and a non-zero compositor transform to appear;
-5. switches to a second temporary workspace while PSD remains displaced;
-6. requires a new workspace generation plus an incremented previous-workspace reset counter;
-7. sends SIGTERM to `psd-shell`;
-8. requires the shell to exit and `j/psd-plugin-state` to report no tracked transforms;
-9. restores the original workspace and cursor position.
+2. switches to a temporary named workspace;
+3. optionally maps the deterministic `psd-integration-client` there so the previous workspace remains alive;
+4. moves the Hyprland cursor into the LEFT gutter and waits for the real ~180 ms dwell navigation;
+5. requires the return shield and exactly one non-zero compositor transform to appear;
+6. switches to a second workspace while PSD remains displaced;
+7. requires a new workspace generation; when the previous workspace remains alive, it also requires an explicit previous-workspace reset;
+8. when the integration client is available, requests real Wayland fullscreen and requires PSD surfaces to unmap plus the compositor transform to reset;
+9. requires fullscreen exit to remap a clean CENTER shell;
+10. sends SIGTERM to `psd-shell` and requires zero tracked transforms afterward;
+11. restores the original workspace and cursor position.
 
-The test deliberately uses empty temporary workspaces, so it does not move existing application windows. It does move the pointer and temporarily changes the focused monitor's workspace. The shell is expected to be stopped at the end of this stronger test.
+With `PSD_PROBE_EXERCISE_HOTPLUG=1`, the same live shell also receives a temporary headless output. The probe requires its independent CENTER surface to appear, verifies the primary monitor is the only transformed output during navigation, and removes the temporary output again while the shell is still alive.
+
+The QEMU CI enables the deterministic client and hotplug paths automatically. On arbitrary real hardware those paths remain opt-in so the probe does not create windows or virtual outputs unless explicitly requested.
 
 GitHub-hosted CI also runs `tests/integration/test-probe-live-session-mock.sh`. That test uses a fake `hyprctl` and fake shell process only to validate the probe's control flow, cleanup ownership, CENTER-layer expectations and error handling. It is not compositor validation and does not replace the real-session probe.
 

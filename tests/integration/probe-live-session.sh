@@ -39,6 +39,19 @@ if [[ ! -f "$PLUGIN_PATH" ]]; then
     exit 1
 fi
 
+if [[ -n "$test_client_path" ]]; then
+    if [[ ! -e "$test_client_path" ]]; then
+        echo "PSD live probe: integration client not found: $test_client_path" >&2
+        exit 1
+    fi
+
+    test_client_path="$(realpath "$test_client_path")"
+    if [[ ! -x "$test_client_path" ]]; then
+        echo "PSD live probe: integration client is not executable: $test_client_path" >&2
+        exit 1
+    fi
+fi
+
 existing_psd_layer="$(hyprctl -j layers | python3 -c 'import json,sys; d=json.load(sys.stdin); print(any(str(x.get("namespace","")).startswith(("psd-shell:","psd-return-shield:")) for m in d.values() for level in m.get("levels",{}).values() for x in level))')"
 if [[ "$existing_psd_layer" == "True" ]]; then
     echo "PSD live probe: a PSD shell/return-shield layer is already mapped; refusing to create a duplicate." >&2
@@ -48,6 +61,10 @@ fi
 loaded_by_probe=0
 shell_pid=""
 log_file="${TMPDIR:-/tmp}/psd-live-session-probe.log"
+client_log_file="${TMPDIR:-/tmp}/psd-integration-client.log"
+test_client_path="${PSD_PROBE_TEST_CLIENT:-}"
+client_pids=()
+hotplug_monitor=""
 runtime_restore_needed=0
 runtime_monitor=""
 runtime_workspace_selector=""
@@ -95,6 +112,47 @@ PY
     )
 }
 
+remove_hotplug_output() {
+    if [[ -z "$hotplug_monitor" ]]; then
+        return 0
+    fi
+
+    local monitor_to_remove="$hotplug_monitor"
+    hyprctl output remove "$monitor_to_remove" >/dev/null 2>&1 || return 1
+
+    for _ in $(seq 1 50); do
+        local monitors_json layers_json
+        monitors_json="$(hyprctl -j monitors 2>/dev/null || printf '[]')"
+        layers_json="$(hyprctl -j layers 2>/dev/null || printf '{}')"
+
+        if python3 - "$monitors_json" "$layers_json" "$monitor_to_remove" <<'PY' >/dev/null 2>&1
+import json
+import sys
+
+monitors = json.loads(sys.argv[1])
+layers = json.loads(sys.argv[2])
+name = sys.argv[3]
+
+if any(m.get("name") == name for m in monitors):
+    raise SystemExit(1)
+
+for monitor_layers in layers.values():
+    for level in monitor_layers.get("levels", {}).values():
+        for layer in level:
+            if layer.get("namespace") == f"psd-shell:{name}":
+                raise SystemExit(1)
+PY
+        then
+            hotplug_monitor=""
+            return 0
+        fi
+
+        sleep 0.1
+    done
+
+    return 1
+}
+
 restore_runtime_context() {
     if [[ "$runtime_restore_needed" != "1" ]]; then
         return
@@ -118,6 +176,14 @@ restore_runtime_context() {
 cleanup() {
     set +e
     hyprctl dispatch plugin:psd:gesture-events 0 >/dev/null 2>&1 || true
+
+    for client_pid in "${client_pids[@]}"; do
+        [[ -n "$client_pid" ]] || continue
+        kill -TERM "$client_pid" >/dev/null 2>&1 || true
+        wait "$client_pid" >/dev/null 2>&1 || true
+    done
+
+    remove_hotplug_output >/dev/null 2>&1 || true
 
     if [[ -n "$shell_pid" ]]; then
         kill -TERM "$shell_pid" >/dev/null 2>&1 || true
@@ -259,6 +325,59 @@ fi
 
 echo "PSD live probe: $monitor_count monitor-local shell surface(s), CENTER shields unmapped PASS"
 
+if [[ "${PSD_PROBE_EXERCISE_HOTPLUG:-0}" == "1" ]]; then
+    baseline_monitors="$(hyprctl -j monitors)"
+    hyprctl output create headless PSD-PROBE >/dev/null
+
+    hotplug_ready=0
+    for _ in $(seq 1 50); do
+        current_monitors="$(hyprctl -j monitors)"
+        layers_json="$(hyprctl -j layers)"
+
+        if hotplug_monitor="$(
+            python3 - "$baseline_monitors" "$current_monitors" "$layers_json" <<'PY'
+import json
+import sys
+
+baseline = {m["name"] for m in json.loads(sys.argv[1])}
+current = json.loads(sys.argv[2])
+layers = json.loads(sys.argv[3])
+
+added = [m["name"] for m in current if m.get("name") not in baseline]
+if len(added) != 1:
+    raise SystemExit(1)
+
+name = added[0]
+namespaces = [
+    layer.get("namespace", "")
+    for level in layers.get(name, {}).get("levels", {}).values()
+    for layer in level
+]
+if namespaces.count(f"psd-shell:{name}") != 1:
+    raise SystemExit(1)
+if f"psd-return-shield:{name}" in namespaces:
+    raise SystemExit(1)
+
+print(name)
+PY
+        )"; then
+            hotplug_ready=1
+            break
+        fi
+
+        sleep 0.1
+    done
+
+    if [[ "$hotplug_ready" != "1" ]]; then
+        echo "PSD live probe: hotplugged output did not receive its own CENTER shell surface." >&2
+        hyprctl -j monitors >&2 || true
+        hyprctl -j layers >&2 || true
+        exit 1
+    fi
+
+    echo "PSD live probe: monitor hot-add + independent CENTER surface on $hotplug_monitor PASS"
+fi
+
 hyprctl dispatch plugin:psd:gesture-events 1 | grep -qx "ok"
 hyprctl dispatch plugin:psd:gesture-events 0 | grep -qx "ok"
 echo "PSD live probe: four-finger gesture arm/disarm PASS"
@@ -366,6 +485,48 @@ PY
     hyprctl dispatch focusmonitor "$primary_monitor" | grep -qx "ok"
     hyprctl dispatch workspace "name:$probe_workspace_a" | grep -qx "ok"
 
+    persistent_client_title=""
+    if [[ -n "$test_client_path" ]]; then
+        persistent_client_title="psd-probe-persistent-$"
+        "$test_client_path" --title "$persistent_client_title" >"$client_log_file" 2>&1 &
+        persistent_client_pid=$!
+        client_pids+=("$persistent_client_pid")
+
+        persistent_ready=0
+        for _ in $(seq 1 50); do
+            clients_json="$(hyprctl -j clients)"
+            if python3 - "$clients_json" "$persistent_client_title" "$probe_workspace_a" <<'PY' >/dev/null 2>&1
+import json
+import sys
+
+clients = json.loads(sys.argv[1])
+title = sys.argv[2]
+workspace_name = sys.argv[3]
+
+for client in clients:
+    workspace = client.get("workspace", {})
+    if client.get("title") == title and str(workspace.get("name", "")) == workspace_name:
+        raise SystemExit(0)
+
+raise SystemExit(1)
+PY
+            then
+                persistent_ready=1
+                break
+            fi
+            sleep 0.1
+        done
+
+        if [[ "$persistent_ready" != "1" ]]; then
+            echo "PSD live probe: persistent integration client did not map on workspace $probe_workspace_a." >&2
+            hyprctl -j clients >&2 || true
+            cat "$client_log_file" >&2 || true
+            exit 1
+        fi
+
+        echo "PSD live probe: persistent Wayland client on previous workspace PASS"
+    fi
+
     hyprctl dispatch movecursor "$runtime_center_x $runtime_center_y" | grep -qx "ok"
     sleep 0.1
     hyprctl dispatch movecursor "$runtime_edge_x $runtime_edge_y" | grep -qx "ok"
@@ -396,7 +557,7 @@ if f"psd-return-shield:{monitor}" not in namespaces:
     raise SystemExit(1)
 
 matches = [x for x in state["trackedTransforms"] if x["monitor"] == monitor]
-if len(matches) != 1:
+if len(matches) != 1 or len(state["trackedTransforms"]) != 1:
     raise SystemExit(1)
 
 transform = matches[0]
@@ -489,10 +650,137 @@ PY
         exit 1
     fi
 
+    if [[ -n "$test_client_path" && "$retarget_mode" != "reset" ]]; then
+        echo "PSD live probe: persistent previous workspace was unexpectedly destroyed during retarget." >&2
+        hyprctl -j workspaces >&2 || true
+        exit 1
+    fi
+
     if [[ "$retarget_mode" == "reset" ]]; then
         echo "PSD live probe: workspace retarget + previous-workspace reset PASS"
     else
         echo "PSD live probe: workspace retarget + previous empty workspace destroyed PASS"
+    fi
+
+    if [[ -n "$test_client_path" ]]; then
+        fullscreen_title="psd-probe-fullscreen-$"
+        "$test_client_path" --title "$fullscreen_title" --fullscreen >>"$client_log_file" 2>&1 &
+        fullscreen_pid=$!
+        client_pids+=("$fullscreen_pid")
+
+        fullscreen_ready=0
+        for _ in $(seq 1 60); do
+            clients_json="$(hyprctl -j clients)"
+            layers_json="$(hyprctl -j layers)"
+            state_json="$(plugin_state)"
+
+            if python3 - "$clients_json" "$layers_json" "$state_json" "$primary_monitor" "$fullscreen_title" <<'PY' >/dev/null 2>&1
+import json
+import sys
+
+clients = json.loads(sys.argv[1])
+layers = json.loads(sys.argv[2])
+state = json.loads(sys.argv[3])
+monitor = sys.argv[4]
+title = sys.argv[5]
+
+client = next((c for c in clients if c.get("title") == title), None)
+if client is None or int(client.get("fullscreen", 0) or 0) <= 0:
+    raise SystemExit(1)
+
+namespaces = {
+    layer.get("namespace", "")
+    for level in layers.get(monitor, {}).get("levels", {}).values()
+    for layer in level
+}
+if f"psd-shell:{monitor}" in namespaces or f"psd-return-shield:{monitor}" in namespaces:
+    raise SystemExit(1)
+
+if any(x.get("monitor") == monitor for x in state.get("trackedTransforms", [])):
+    raise SystemExit(1)
+PY
+            then
+                fullscreen_ready=1
+                break
+            fi
+
+            sleep 0.1
+        done
+
+        if [[ "$fullscreen_ready" != "1" ]]; then
+            echo "PSD live probe: fullscreen did not suppress shell/reset transform on $primary_monitor." >&2
+            hyprctl -j clients >&2 || true
+            hyprctl -j layers >&2 || true
+            plugin_state >&2 || true
+            cat "$log_file" >&2 || true
+            cat "$client_log_file" >&2 || true
+            exit 1
+        fi
+
+        echo "PSD live probe: fullscreen enter suppresses shell + resets transform PASS"
+
+        kill -TERM "$fullscreen_pid" >/dev/null 2>&1 || true
+        wait "$fullscreen_pid" >/dev/null 2>&1 || true
+
+        fullscreen_exit_ready=0
+        for _ in $(seq 1 60); do
+            clients_json="$(hyprctl -j clients)"
+            layers_json="$(hyprctl -j layers)"
+            state_json="$(plugin_state)"
+
+            if python3 - "$clients_json" "$layers_json" "$state_json" "$primary_monitor" "$fullscreen_title" <<'PY' >/dev/null 2>&1
+import json
+import sys
+
+clients = json.loads(sys.argv[1])
+layers = json.loads(sys.argv[2])
+state = json.loads(sys.argv[3])
+monitor = sys.argv[4]
+title = sys.argv[5]
+
+if any(c.get("title") == title for c in clients):
+    raise SystemExit(1)
+
+namespaces = [
+    layer.get("namespace", "")
+    for level in layers.get(monitor, {}).get("levels", {}).values()
+    for layer in level
+]
+if namespaces.count(f"psd-shell:{monitor}") != 1:
+    raise SystemExit(1)
+if f"psd-return-shield:{monitor}" in namespaces:
+    raise SystemExit(1)
+if any(x.get("monitor") == monitor for x in state.get("trackedTransforms", [])):
+    raise SystemExit(1)
+PY
+            then
+                fullscreen_exit_ready=1
+                break
+            fi
+
+            sleep 0.1
+        done
+
+        if [[ "$fullscreen_exit_ready" != "1" ]]; then
+            echo "PSD live probe: shell did not return cleanly to CENTER after fullscreen exit." >&2
+            hyprctl -j clients >&2 || true
+            hyprctl -j layers >&2 || true
+            plugin_state >&2 || true
+            exit 1
+        fi
+
+        echo "PSD live probe: fullscreen exit remaps clean CENTER shell PASS"
+    fi
+
+    if [[ -n "$hotplug_monitor" ]]; then
+        removed_monitor="$hotplug_monitor"
+        if ! remove_hotplug_output; then
+            echo "PSD live probe: hotplugged output $removed_monitor did not detach cleanly." >&2
+            hyprctl -j monitors >&2 || true
+            hyprctl -j layers >&2 || true
+            exit 1
+        fi
+        echo "PSD live probe: monitor hot-remove + shell teardown PASS"
     fi
 
     kill -TERM "$shell_pid"
@@ -542,6 +830,15 @@ PY
     echo "PSD live probe: SIGTERM drain + final compositor reset PASS"
 
     restore_runtime_context
+fi
+
+if [[ -n "$hotplug_monitor" ]]; then
+    removed_monitor="$hotplug_monitor"
+    if ! remove_hotplug_output; then
+        echo "PSD live probe: hotplugged output $removed_monitor did not detach cleanly." >&2
+        exit 1
+    fi
+    echo "PSD live probe: monitor hot-remove + shell teardown PASS"
 fi
 
 echo "PSD live probe: PASS"

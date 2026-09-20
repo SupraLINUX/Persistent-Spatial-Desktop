@@ -7,7 +7,7 @@ image_cache="${PSD_VM_IMAGE_CACHE:-${HOME}/.cache/psd-vm/ubuntu-26.04-minimal-cl
 image_url="${PSD_VM_IMAGE_URL:-https://cloud-images.ubuntu.com/minimal/releases/resolute/release-20260827/ubuntu-26.04-minimal-cloudimg-amd64.img}"
 ssh_port="${PSD_VM_SSH_PORT:-2222}"
 
-for command in qemu-system-x86_64 qemu-img cloud-localds curl ssh ssh-keygen tar; do
+for command in qemu-system-x86_64 qemu-img cloud-localds curl sha256sum ssh ssh-keygen tar; do
     if ! command -v "$command" >/dev/null 2>&1; then
         echo "PSD QEMU probe: missing host command: $command" >&2
         exit 1
@@ -25,6 +25,9 @@ seed_image="$work_dir/seed.img"
 ssh_key="$work_dir/id_ed25519"
 user_data="$work_dir/user-data"
 qemu_pid=""
+image_name="$(basename "$image_url")"
+checksum_url="${PSD_VM_IMAGE_CHECKSUM_URL:-${image_url%/*}/SHA256SUMS}"
+checksum_file="$work_dir/SHA256SUMS"
 
 cleanup() {
     local status=$?
@@ -54,11 +57,53 @@ cleanup() {
 }
 trap cleanup EXIT
 
+echo "PSD QEMU probe: verifying pinned Ubuntu image checksum"
+curl --fail --location --retry 4 --retry-delay 2 \
+    "$checksum_url" \
+    --output "$checksum_file"
+
+expected_image_sha256="$(
+    awk -v wanted="$image_name" '
+        {
+            name=$2
+            sub(/^\\*/, "", name)
+            if (name == wanted) {
+                print $1
+                exit
+            }
+        }
+    ' "$checksum_file"
+)"
+
+if [[ ! "$expected_image_sha256" =~ ^[0-9a-fA-F]{64}$ ]]; then
+    echo "PSD QEMU probe: no SHA256 entry for $image_name in $checksum_url" >&2
+    exit 1
+fi
+
+verify_image() {
+    printf '%s  %s\n' "$expected_image_sha256" "$image_cache" | sha256sum --check --status
+}
+
+if [[ -s "$image_cache" ]] && ! verify_image; then
+    echo "PSD QEMU probe: cached Ubuntu image checksum mismatch; discarding cache copy" >&2
+    rm -f "$image_cache"
+fi
+
 if [[ ! -s "$image_cache" ]]; then
     echo "PSD QEMU probe: downloading Ubuntu Minimal 26.04 image"
-    curl --fail --location --retry 4 --retry-delay 2         "$image_url"         --output "$image_cache.part"
+    curl --fail --location --retry 4 --retry-delay 2 \
+        "$image_url" \
+        --output "$image_cache.part"
     mv "$image_cache.part" "$image_cache"
 fi
+
+if ! verify_image; then
+    echo "PSD QEMU probe: Ubuntu image SHA256 verification failed" >&2
+    rm -f "$image_cache"
+    exit 1
+fi
+
+echo "PSD QEMU probe: Ubuntu image SHA256 PASS ($expected_image_sha256)"
 
 cp --reflink=auto "$image_cache" "$disk_image" 2>/dev/null     || cp "$image_cache" "$disk_image"
 qemu-img resize "$disk_image" 12G >/dev/null

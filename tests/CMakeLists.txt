@@ -21,3 +21,18 @@ qt_add_resources(psd-core-tests "psd_test_spec"
 )
 
 add_test(NAME psd-core-tests COMMAND psd-core-tests)
+
+
+# Small deterministic Wayland client used only by compositor integration probes.
+# It is not installed and is not part of the PSD runtime.
+find_package(Qt6 6.10 REQUIRED COMPONENTS Gui Widgets)
+
+qt_add_executable(psd-integration-client
+    integration/psd-integration-client.cpp
+)
+
+target_link_libraries(psd-integration-client
+    PRIVATE
+        Qt6::Gui
+        Qt6::Widgets
+)
