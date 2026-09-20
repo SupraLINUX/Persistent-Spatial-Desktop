@@ -185,9 +185,9 @@ That opt-in mode uses the real shell input path rather than a test-only shell AP
 5. requires the return shield and exactly one non-zero compositor transform to appear;
 6. switches to a second workspace while PSD remains displaced;
 7. requires a new workspace generation; when the previous workspace remains alive, it also requires an explicit previous-workspace reset;
-8. when the integration client is available, requests real Wayland fullscreen and requires PSD surfaces to unmap plus the compositor transform to reset;
-9. requires fullscreen exit to remap a clean CENTER shell;
-10. with `PSD_PROBE_EXERCISE_CRASH_RECOVERY=1`, displaces CENTER again, kills `psd-shell` with SIGKILL, restarts it, and requires startup recovery to clear any residual compositor transform and map clean CENTER;
+8. with `PSD_PROBE_EXERCISE_CRASH_RECOVERY=1`, kills `psd-shell` while that real displaced transform is still active, records whether the compositor retained a residual transform, restarts the shell, and requires every monitor to recover in clean CENTER with zero tracked transforms;
+9. when the integration client is available, requests Hyprland fullscreen and requires PSD surfaces to unmap plus the compositor transform to reset;
+10. requires fullscreen exit to remap a clean CENTER shell;
 11. sends SIGTERM to the recovered shell and requires zero tracked transforms afterward;
 12. restores the original workspace and cursor position.
 
