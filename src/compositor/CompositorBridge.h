@@ -31,6 +31,10 @@ public:
     [[nodiscard]] QVariantList windows() const;
     Q_INVOKABLE [[nodiscard]] bool monitorHasFullscreenWindow(const QString &monitorName) const;
 
+    [[nodiscard]] virtual bool spatialTransformAvailable() const = 0;
+    virtual quint64 setSpatialTransformOffset(const QString &monitorName, double x, double y) = 0;
+    virtual quint64 resetSpatialTransformOffset(const QString &monitorName) = 0;
+
     virtual void start() = 0;
     Q_INVOKABLE virtual void refreshAll() = 0;
 
@@ -43,8 +47,14 @@ signals:
     void workspacesChanged();
     void windowsChanged();
     void compositorEvent(const QString &name, const QString &payload);
+    void spatialTransformCommandFinished(
+        quint64 commandId,
+        const QString &monitorName,
+        bool success,
+        const QString &message);
 
 protected:
+    [[nodiscard]] quint64 allocateSpatialTransformCommandId();
     void setAvailable(bool available);
     void setEventStreamConnected(bool connected);
     void setLastError(const QString &error);
@@ -61,4 +71,5 @@ private:
     QVariantList m_monitors;
     QVariantList m_workspaces;
     QVariantList m_windows;
+    quint64 m_nextSpatialTransformCommandId = 1;
 };
