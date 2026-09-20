@@ -232,6 +232,7 @@ assert data["monitorTargeting"] is True, data
 assert data["fourFingerGestureEventsExperimental"] is True, data
 assert data["gestureEventsDefaultEnabled"] is False, data
 assert data["diagnosticStateQueryExperimental"] is True, data
+assert data["lifecycleEventsExperimental"] is True, data
 print("PSD live probe: plugin capability handshake PASS")
 PY
 
@@ -893,6 +894,184 @@ PY
 
         kill -TERM "$fullscreen_pid" >/dev/null 2>&1 || true
         wait "$fullscreen_pid" >/dev/null 2>&1 || true
+    fi
+
+    if [[ "${PSD_PROBE_EXERCISE_PLUGIN_LIFECYCLE:-0}" == "1" ]]; then
+        hyprctl dispatch movecursor "$runtime_center_x $runtime_center_y" | grep -qx "ok"
+        sleep 0.1
+        hyprctl dispatch movecursor "$runtime_edge_x $runtime_edge_y" | grep -qx "ok"
+
+        lifecycle_displaced=0
+        for _ in $(seq 1 50); do
+            layers_json="$(hyprctl -j layers)"
+            state_json="$(plugin_state)"
+
+            if python3 - "$layers_json" "$state_json" "$primary_monitor" <<'PY' >/dev/null 2>&1
+import json
+import sys
+
+layers = json.loads(sys.argv[1])
+state = json.loads(sys.argv[2])
+monitor = sys.argv[3]
+
+namespaces = {
+    layer.get("namespace", "")
+    for level in layers.get(monitor, {}).get("levels", {}).values()
+    for layer in level
+}
+matches = [x for x in state.get("trackedTransforms", []) if x.get("monitor") == monitor]
+
+if f"psd-return-shield:{monitor}" not in namespaces:
+    raise SystemExit(1)
+if len(matches) != 1 or len(state.get("trackedTransforms", [])) != 1:
+    raise SystemExit(1)
+if abs(float(matches[0].get("x", 0.0))) < 1.0 and abs(float(matches[0].get("y", 0.0))) < 1.0:
+    raise SystemExit(1)
+PY
+            then
+                lifecycle_displaced=1
+                break
+            fi
+            sleep 0.1
+        done
+
+        if [[ "$lifecycle_displaced" != "1" ]]; then
+            echo "PSD live probe: could not establish displaced state before plugin lifecycle test." >&2
+            hyprctl -j layers >&2 || true
+            plugin_state >&2 || true
+            exit 1
+        fi
+
+        sleep 0.6
+        hyprctl plugin unload "$PLUGIN_PATH" | grep -qx "ok"
+
+        unload_centered=0
+        for _ in $(seq 1 60); do
+            plugins_json="$(hyprctl -j plugin list)"
+            layers_json="$(hyprctl -j layers)"
+            monitors_json="$(hyprctl -j monitors)"
+
+            if python3 - "$plugins_json" "$layers_json" "$monitors_json" <<'PY' >/dev/null 2>&1
+import json
+import sys
+
+plugins = json.loads(sys.argv[1])
+layers = json.loads(sys.argv[2])
+monitors = json.loads(sys.argv[3])
+
+if any(plugin.get("name") == "psd-hyprland-plugin" for plugin in plugins):
+    raise SystemExit(1)
+
+for monitor in monitors:
+    name = monitor["name"]
+    namespaces = [
+        layer.get("namespace", "")
+        for level in layers.get(name, {}).get("levels", {}).values()
+        for layer in level
+    ]
+    if namespaces.count(f"psd-shell:{name}") != 1:
+        raise SystemExit(1)
+    if f"psd-return-shield:{name}" in namespaces:
+        raise SystemExit(1)
+PY
+            then
+                unload_centered=1
+                break
+            fi
+            sleep 0.1
+        done
+
+        if [[ "$unload_centered" != "1" ]]; then
+            echo "PSD live probe: plugin unload did not force every shell instance back to CENTER." >&2
+            hyprctl -j plugin list >&2 || true
+            hyprctl -j layers >&2 || true
+            cat "$log_file" >&2 || true
+            exit 1
+        fi
+
+        echo "PSD live probe: plugin unload while displaced -> clean CENTER PASS"
+
+        hyprctl plugin load "$PLUGIN_PATH" | grep -qx "ok"
+
+        reload_ready=0
+        for _ in $(seq 1 60); do
+            capabilities_json="$(hyprctl -j psd-plugin 2>/dev/null || printf '{}')"
+            state_json="$(hyprctl -j psd-plugin-state 2>/dev/null || printf '{"trackedTransforms":["unavailable"]}')"
+
+            if python3 - "$capabilities_json" "$state_json" <<'PY' >/dev/null 2>&1
+import json
+import sys
+
+capabilities = json.loads(sys.argv[1])
+state = json.loads(sys.argv[2])
+
+if capabilities.get("protocolVersion") != 3:
+    raise SystemExit(1)
+if capabilities.get("lifecycleEventsExperimental") is not True:
+    raise SystemExit(1)
+if state.get("trackedTransforms") != []:
+    raise SystemExit(1)
+PY
+            then
+                reload_ready=1
+                break
+            fi
+            sleep 0.1
+        done
+
+        if [[ "$reload_ready" != "1" ]]; then
+            echo "PSD live probe: plugin reload handshake did not become ready." >&2
+            hyprctl -j plugin list >&2 || true
+            exit 1
+        fi
+
+        hyprctl dispatch movecursor "$runtime_center_x $runtime_center_y" | grep -qx "ok"
+        sleep 0.1
+        hyprctl dispatch movecursor "$runtime_edge_x $runtime_edge_y" | grep -qx "ok"
+
+        reload_transform_ready=0
+        for _ in $(seq 1 60); do
+            layers_json="$(hyprctl -j layers)"
+            state_json="$(plugin_state)"
+
+            if python3 - "$layers_json" "$state_json" "$primary_monitor" <<'PY' >/dev/null 2>&1
+import json
+import sys
+
+layers = json.loads(sys.argv[1])
+state = json.loads(sys.argv[2])
+monitor = sys.argv[3]
+
+namespaces = {
+    layer.get("namespace", "")
+    for level in layers.get(monitor, {}).get("levels", {}).values()
+    for layer in level
+}
+matches = [x for x in state.get("trackedTransforms", []) if x.get("monitor") == monitor]
+
+if f"psd-return-shield:{monitor}" not in namespaces:
+    raise SystemExit(1)
+if len(matches) != 1 or len(state.get("trackedTransforms", [])) != 1:
+    raise SystemExit(1)
+if abs(float(matches[0].get("x", 0.0))) < 1.0 and abs(float(matches[0].get("y", 0.0))) < 1.0:
+    raise SystemExit(1)
+PY
+            then
+                reload_transform_ready=1
+                break
+            fi
+            sleep 0.1
+        done
+
+        if [[ "$reload_transform_ready" != "1" ]]; then
+            echo "PSD live probe: shell did not reacquire compositor transform after plugin reload." >&2
+            hyprctl -j layers >&2 || true
+            plugin_state >&2 || true
+            cat "$log_file" >&2 || true
+            exit 1
+        fi
+
+        echo "PSD live probe: plugin reload event + transform reacquisition PASS"
     fi
 
     if [[ -n "$hotplug_monitor" ]]; then

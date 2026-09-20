@@ -77,11 +77,14 @@ The current experimental protocol is monitor-scoped and advertises:
 - plugin version;
 - render-offset experiment support;
 - explicit monitor targeting;
-- opt-in four-finger gesture events.
+- opt-in four-finger gesture events;
+- plugin lifecycle events required for safe hot unload/reload.
 
-Without this handshake, compositor motion sync remains disabled.
+Without this handshake, compositor motion sync remains disabled. The current runtime also requires `lifecycleEventsExperimental=true`; an older experimental plugin that cannot announce unload/reload is intentionally treated as transform-incompatible.
 
 The experimental plugin can emit `psdgesturebegin`, `psdgestureupdate`, and `psdgestureend` over Hyprland's existing event socket. The plugin does **not** intercept four-finger swipes merely because it is loaded: `plugin:psd:gesture-events 1` must be explicitly enabled. Three-finger gestures remain untouched.
+
+The same event socket carries `psdpluginready` and `psdpluginunloading`. These are lifecycle safety events, not public PSD API. On unload, the bridge invalidates transform capabilities immediately and every enabled monitor-local sync snaps its visual motion to CENTER while the plugin resets all touched workspaces. On reload, the ready event triggers a fresh capability handshake. A failed transform command also refreshes capabilities as a fallback if lifecycle delivery races the command.
 
 ### Experimental diagnostic state
 
@@ -134,6 +137,6 @@ Normal shell shutdown uses the same lifecycle with a bounded drain period. SIGTE
 
 The Hyprland plugin also tracks the exact workspace transformed by PSD for each monitor. `plugin:psd:reset <monitor>` resets that tracked workspace rather than whichever workspace happens to be active when the reset arrives. When the compositor reports a changed active workspace while PSD is displaced, the runtime replays the current non-zero transform; the plugin first resets the previously tracked workspace and then adopts the new active workspace. Plugin unload still resets every workspace touched by the experiment.
 
-These safeguards reduce residual-offset risk during normal shutdown, workspace changes and monitor teardown. They do not make the experiment crash-proof against SIGKILL, compositor crashes or machine loss; those remain part of real-session fault testing.
+These safeguards reduce residual-offset risk during normal shutdown, workspace changes, monitor teardown and plugin hot unload/reload. QEMU integration also verifies that SIGKILL can leave a residual transform but a subsequent shell start clears it back to CENTER. A compositor crash or machine loss still cannot execute cleanup and remains a separate recovery boundary.
 
 Do not emulate the final spatial transform by repeatedly moving each client window through public dispatchers unless implementation evidence proves there is no better compositor-level path.

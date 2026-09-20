@@ -141,14 +141,21 @@ bool SpatialCompositorSync::shutdownAndReset(int timeoutMs)
 
 void SpatialCompositorSync::handleBridgeAvailabilityChanged()
 {
+    const bool nowActive = active();
     emit activeChanged();
+
+    if (!nowActive && m_enabled) {
+        m_hasPending = false;
+        if (!m_motion->offset().isNull() || m_motion->running())
+            m_motion->snapToCenter();
+    }
 
     if (m_resetRequested) {
         dispatchPending();
         return;
     }
 
-    if (active())
+    if (nowActive)
         queueCurrentOffset();
 }
 

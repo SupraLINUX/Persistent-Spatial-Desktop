@@ -69,7 +69,8 @@ bool HyprlandIpcBridge::spatialTransformAvailable() const
 
     const QVariantMap currentCapabilities = capabilities();
     return currentCapabilities.value(QStringLiteral("spatialRenderOffsetExperimental")).toBool()
-        && currentCapabilities.value(QStringLiteral("monitorTargeting")).toBool();
+        && currentCapabilities.value(QStringLiteral("monitorTargeting")).toBool()
+        && currentCapabilities.value(QStringLiteral("lifecycleEventsExperimental")).toBool();
 }
 
 void HyprlandIpcBridge::start()
@@ -115,6 +116,8 @@ void HyprlandIpcBridge::refreshCapabilities()
                             object.value(QStringLiteral("monitorTargeting")).toBool());
         capabilities.insert(QStringLiteral("fourFingerGestureEventsExperimental"),
                             object.value(QStringLiteral("fourFingerGestureEventsExperimental")).toBool());
+        capabilities.insert(QStringLiteral("lifecycleEventsExperimental"),
+                            object.value(QStringLiteral("lifecycleEventsExperimental")).toBool());
         setCapabilities(std::move(capabilities));
     }, false);
 }
@@ -146,6 +149,8 @@ quint64 HyprlandIpcBridge::setSpatialTransformOffset(
     requestText(request, [this, commandId, monitorName](const QByteArray &response) {
         const QString result = QString::fromUtf8(response).trimmed();
         const bool success = result == QStringLiteral("ok");
+        if (!success)
+            refreshCapabilities();
         emit spatialTransformCommandFinished(commandId, monitorName, success, result);
     });
 
@@ -171,6 +176,8 @@ quint64 HyprlandIpcBridge::resetSpatialTransformOffset(const QString &monitorNam
                 [this, commandId, monitorName](const QByteArray &response) {
         const QString result = QString::fromUtf8(response).trimmed();
         const bool success = result == QStringLiteral("ok");
+        if (!success)
+            refreshCapabilities();
         emit spatialTransformCommandFinished(commandId, monitorName, success, result);
     });
 
@@ -249,6 +256,17 @@ void HyprlandIpcBridge::handleEventLine(const QByteArray &line)
         return;
 
     emit compositorEvent(event.name, event.payload);
+
+    if (event.name == QStringLiteral("psdpluginready")) {
+        QTimer::singleShot(0, this, &HyprlandIpcBridge::refreshCapabilities);
+        return;
+    }
+
+    if (event.name == QStringLiteral("psdpluginunloading")) {
+        cancelSpatialGestures();
+        setCapabilities({});
+        return;
+    }
 
     if (event.name == QStringLiteral("psdgesturebegin")) {
         const auto gesture = HyprlandProtocol::parseSpatialGestureBegin(event.payload);

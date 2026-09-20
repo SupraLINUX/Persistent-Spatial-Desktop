@@ -90,6 +90,7 @@ It then connects to Hyprland's documented command and event UNIX sockets.
 - SIGTERM/SIGINT conversion into orderly Qt shutdown so compositor cleanup can run;
 - plugin-side tracking of the exact workspace PSD transformed, avoiding reset of the wrong active workspace;
 - experimental `j/psd-plugin-state` diagnostics for integration probes without exposing Hyprland internals as a PSD API;
+- event-driven plugin lifecycle safety: hot unload forces CENTER and hot reload re-handshakes/reacquires transform capability without polling;
 - event-coalesced state refreshes;
 - no compositor polling loop;
 - unit tests for tokens, spatial state, responsive geometry, motion authority, Hyprland protocol parsing and compositor reset sequencing;
@@ -188,12 +189,13 @@ That opt-in mode uses the real shell input path rather than a test-only shell AP
 8. with `PSD_PROBE_EXERCISE_CRASH_RECOVERY=1`, kills `psd-shell` while that real displaced transform is still active, records whether the compositor retained a residual transform, restarts the shell, and requires every monitor to recover in clean CENTER with zero tracked transforms;
 9. when the integration client is available, requests Hyprland fullscreen and requires PSD surfaces to unmap plus the compositor transform to reset;
 10. requires fullscreen exit to remap a clean CENTER shell;
-11. sends SIGTERM to the recovered shell and requires zero tracked transforms afterward;
-12. restores the original workspace and cursor position.
+11. with `PSD_PROBE_EXERCISE_PLUGIN_LIFECYCLE=1`, displaces CENTER, unloads the compositor plugin, requires every shell instance to snap to clean CENTER, reloads the plugin and requires the real transform path to become usable again;
+12. sends SIGTERM to the recovered shell and requires zero tracked transforms afterward;
+13. restores the original workspace and cursor position.
 
 With `PSD_PROBE_EXERCISE_HOTPLUG=1`, the same live shell also receives a temporary headless output. The probe requires its independent CENTER surface to appear, verifies the primary monitor is the only transformed output during navigation, and removes the temporary output again while the shell is still alive.
 
-The QEMU CI enables the deterministic client, hotplug and SIGKILL-recovery paths automatically. On arbitrary real hardware those paths remain opt-in so the probe does not create windows or virtual outputs unless explicitly requested.
+The QEMU CI enables the deterministic client, hotplug, SIGKILL-recovery and plugin hot unload/reload paths automatically. On arbitrary real hardware those paths remain opt-in so the probe does not create windows or virtual outputs unless explicitly requested.
 
 GitHub-hosted CI also runs `tests/integration/test-probe-live-session-mock.sh`. That test uses a fake `hyprctl` and fake shell process only to validate the probe's control flow, cleanup ownership, CENTER-layer expectations and error handling. It is not compositor validation and does not replace the real-session probe.
 

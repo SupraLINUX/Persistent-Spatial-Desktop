@@ -311,10 +311,10 @@ void onSwipeEnd(void *, SCallbackInfo &info, std::any parameter)
 std::string capabilitiesResponse(eHyprCtlOutputFormat format, std::string)
 {
     if (format == FORMAT_JSON) {
-        return R"json({"protocolVersion":3,"pluginVersion":"0.1.0","spatialRenderOffsetExperimental":true,"monitorTargeting":true,"fourFingerGestureEventsExperimental":true,"gestureEventsDefaultEnabled":false,"diagnosticStateQueryExperimental":true})json";
+        return R"json({"protocolVersion":3,"pluginVersion":"0.1.1","spatialRenderOffsetExperimental":true,"monitorTargeting":true,"fourFingerGestureEventsExperimental":true,"gestureEventsDefaultEnabled":false,"diagnosticStateQueryExperimental":true,"lifecycleEventsExperimental":true})json";
     }
 
-    return "protocolVersion=3 pluginVersion=0.1.0 spatialRenderOffsetExperimental=true monitorTargeting=true fourFingerGestureEventsExperimental=true gestureEventsDefaultEnabled=false diagnosticStateQueryExperimental=true";
+    return "protocolVersion=3 pluginVersion=0.1.1 spatialRenderOffsetExperimental=true monitorTargeting=true fourFingerGestureEventsExperimental=true gestureEventsDefaultEnabled=false diagnosticStateQueryExperimental=true lifecycleEventsExperimental=true";
 }
 
 std::string stateResponse(eHyprCtlOutputFormat format, std::string)
@@ -423,11 +423,13 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle)
     if (!success)
         throw std::runtime_error("PSD failed to register experimental Hyprland integration");
 
+    postGestureEvent("psdpluginready", "3");
+
     return {
         "psd-hyprland-plugin",
         "Persistent Spatial Desktop compositor integration experiment",
         "SupraLINUX",
-        "0.1.0",
+        "0.1.1",
     };
 }
 
@@ -435,6 +437,7 @@ APICALL EXPORT void PLUGIN_EXIT()
 {
     g_gestureEventsEnabled = false;
     finishSpatialGesture(true, 0);
+    postGestureEvent("psdpluginunloading", "3");
     resetTouchedWorkspaces();
 
     g_swipeBeginCallback.reset();

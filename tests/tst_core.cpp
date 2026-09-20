@@ -124,6 +124,7 @@ private slots:
     void spatialGestureCancelsExplicitly();
     void spatialCompositorSyncSerializesFinalReset();
     void spatialCompositorSyncRetargetsCurrentOffset();
+    void spatialCompositorSyncCentersOnCapabilityLoss();
     void spatialCompositorSyncShutdownDrainsFinalReset();
     void hyprlandSocketPaths();
     void hyprlandEventParsing();
@@ -426,6 +427,54 @@ void CoreTest::spatialCompositorSyncRetargetsCurrentOffset()
 
     bridge.finishTransformCommand(retarget.id);
     QVERIFY(sync.idle());
+}
+
+void CoreTest::spatialCompositorSyncCentersOnCapabilityLoss()
+{
+    SpatialState state;
+    SpatialLayout layout;
+    layout.setViewportSize(QSizeF(1280, 800));
+
+    SpatialMotionController motion(&state, &layout);
+    TestCompositorBridge bridge;
+    bridge.setSpatialTransformAvailable(true);
+
+    SpatialCompositorSync sync(
+        &motion, &bridge, QStringLiteral("DP-1"));
+
+    sync.setEnabled(true);
+    bridge.finishTransformCommand(bridge.transformCommands().at(0).id);
+    QVERIFY(sync.idle());
+
+    QVERIFY(state.navigate(QStringLiteral("left")));
+    QCOMPARE(state.currentSurface(), QStringLiteral("left"));
+    QVERIFY(!motion.offset().isNull());
+
+    const auto offsetCommand = bridge.transformCommands().last();
+    QVERIFY(!offsetCommand.reset);
+    bridge.finishTransformCommand(offsetCommand.id);
+    QVERIFY(sync.idle());
+
+    const int commandCountBeforeLoss = bridge.transformCommands().size();
+    bridge.setSpatialTransformAvailable(false);
+
+    QVERIFY(!sync.active());
+    QCOMPARE(state.currentSurface(), QStringLiteral("center"));
+    QCOMPARE(motion.offset(), QPointF());
+    QVERIFY(!motion.running());
+    QCOMPARE(bridge.transformCommands().size(), commandCountBeforeLoss);
+
+    bridge.setSpatialTransformAvailable(true);
+    QVERIFY(sync.active());
+    QCOMPARE(bridge.transformCommands().size(), commandCountBeforeLoss + 1);
+
+    const auto recoveryReset = bridge.transformCommands().last();
+    QVERIFY(recoveryReset.reset);
+    QCOMPARE(recoveryReset.monitorName, QStringLiteral("DP-1"));
+
+    bridge.finishTransformCommand(recoveryReset.id);
+    QVERIFY(sync.idle());
+    QVERIFY(sync.lastError().isEmpty());
 }
 
 void CoreTest::spatialCompositorSyncShutdownDrainsFinalReset()
