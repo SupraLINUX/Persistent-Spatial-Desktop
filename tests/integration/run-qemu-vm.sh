@@ -272,6 +272,7 @@ ssh_guest '
     export WAYLAND_DISPLAY=wayland-psd
     export LIBGL_ALWAYS_SOFTWARE=1
     export GALLIUM_DRIVER=llvmpipe
+    export AQ_TRACE=1
 
     weston --backend=headless --renderer=pixman --socket="$WAYLAND_DISPLAY" --idle-time=0 --width=1920 --height=1080 --no-config >"$weston_log" 2>&1 &
     weston_pid=$!
