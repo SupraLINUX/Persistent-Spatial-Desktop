@@ -46,6 +46,8 @@ private:
 
     void createForScreen(QScreen *screen);
     void destroyForScreen(QScreen *screen);
+    bool createShellWindow(Instance *instance);
+    void destroyShellWindow(Instance *instance);
     void configureLayerSurface(Instance *instance);
     void configureReturnShield(Instance *instance);
     void updateReturnShield(Instance *instance);

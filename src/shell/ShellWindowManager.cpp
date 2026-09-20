@@ -116,6 +116,51 @@ bool ShellWindowManager::shutdownCompositorSync(int timeoutMs)
     return success;
 }
 
+bool ShellWindowManager::createShellWindow(Instance *instance)
+{
+    if (!instance || !instance->screen || !instance->context)
+        return false;
+
+    if (instance->window)
+        return true;
+
+    QQmlComponent component(m_engine, QUrl(QStringLiteral("qrc:/qml/Main.qml")));
+    if (component.status() != QQmlComponent::Ready) {
+        qCritical().noquote()
+            << "PSD failed to load shell component for"
+            << instance->screen->name()
+            << component.errorString();
+        return false;
+    }
+
+    QObject *object = component.create(instance->context);
+    auto *window = qobject_cast<QQuickWindow *>(object);
+    if (!window) {
+        qCritical().noquote()
+            << "PSD shell root is not a QQuickWindow for"
+            << instance->screen->name();
+        delete object;
+        return false;
+    }
+
+    instance->window = window;
+    instance->window->setScreen(instance->screen);
+    configureLayerSurface(instance);
+    return true;
+}
+
+void ShellWindowManager::destroyShellWindow(Instance *instance)
+{
+    if (!instance || !instance->window)
+        return;
+
+    QQuickWindow *window = instance->window;
+    instance->window = nullptr;
+
+    window->close();
+    delete window;
+}
+
 void ShellWindowManager::createForScreen(QScreen *screen)
 {
     if (!screen || m_instances.contains(screen))
@@ -142,25 +187,15 @@ void ShellWindowManager::createForScreen(QScreen *screen)
     instance->context->setContextProperty(QStringLiteral("PsdCompositorSync"), instance->compositorSync);
     instance->context->setContextProperty(QStringLiteral("PsdScreenName"), screen->name());
 
-    QQmlComponent component(m_engine, QUrl(QStringLiteral("qrc:/qml/Main.qml")));
-    if (component.status() != QQmlComponent::Ready) {
-        qCritical().noquote() << "PSD failed to load shell component for" << screen->name()
-                              << component.errorString();
+    if (!createShellWindow(instance)) {
+        instance->context->deleteLater();
+        instance->compositorSync->deleteLater();
+        instance->motion->deleteLater();
+        instance->layout->deleteLater();
+        instance->state->deleteLater();
         delete instance;
         return;
     }
-
-    QObject *object = component.create(instance->context);
-    instance->window = qobject_cast<QQuickWindow *>(object);
-    if (!instance->window) {
-        qCritical().noquote() << "PSD shell root is not a QQuickWindow for" << screen->name();
-        delete object;
-        delete instance;
-        return;
-    }
-
-    instance->window->setScreen(screen);
-    configureLayerSurface(instance);
 
     QQmlComponent shieldComponent(m_engine, QUrl(QStringLiteral("qrc:/qml/ReturnShield.qml")));
     if (shieldComponent.status() != QQmlComponent::Ready) {
@@ -219,10 +254,7 @@ void ShellWindowManager::destroyForScreen(QScreen *screen)
         instance->returnShield->deleteLater();
     }
 
-    if (instance->window) {
-        instance->window->close();
-        instance->window->deleteLater();
-    }
+    destroyShellWindow(instance);
 
     if (instance->context)
         instance->context->deleteLater();
@@ -342,7 +374,7 @@ ShellWindowManager::Instance *ShellWindowManager::instanceForMonitorName(const Q
 
 void ShellWindowManager::updateFullscreenState(Instance *instance)
 {
-    if (!instance || !instance->screen || !instance->window
+    if (!instance || !instance->screen || !instance->context
         || !instance->returnShield || !instance->motion)
         return;
 
@@ -350,7 +382,8 @@ void ShellWindowManager::updateFullscreenState(Instance *instance)
         m_compositorBridge->monitorHasFullscreenWindow(instance->screen->name());
 
     if (instance->fullscreenStateInitialized
-        && instance->fullscreenSuppressed == fullscreen)
+        && instance->fullscreenSuppressed == fullscreen
+        && (fullscreen || instance->window))
         return;
 
     instance->fullscreenStateInitialized = true;
@@ -359,7 +392,24 @@ void ShellWindowManager::updateFullscreenState(Instance *instance)
     if (fullscreen) {
         instance->returnShield->hide();
         instance->motion->snapToCenter();
-        instance->window->hide();
+
+        // A Qt Wayland window is reset when it is unmapped. Reusing the same
+        // QQuickWindow after fullscreen proved insufficient for reliable
+        // pointer/hover delivery through LayerShellQt. Keep the monitor-local
+        // PSD state/controllers alive, but destroy the native shell window so
+        // fullscreen owns the output with no PSD layer surface remaining.
+        destroyShellWindow(instance);
+        return;
+    }
+
+    // Recreate a fresh QWaylandWindow + layer-shell surface after fullscreen.
+    // This preserves SpatialState/Layout/Motion/Sync while rebuilding the
+    // input-capable shell surface from the same QML context.
+    if (!instance->window && !createShellWindow(instance)) {
+        instance->fullscreenStateInitialized = false;
+        qCritical().noquote()
+            << "PSD failed to recreate shell surface after fullscreen for"
+            << instance->screen->name();
         return;
     }
 
