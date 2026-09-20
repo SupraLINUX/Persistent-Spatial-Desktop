@@ -4,40 +4,63 @@ set -euo pipefail
 SHELL_PATH="${1:-build/psd-shell}"
 PLUGIN_PATH="${2:-build-hypr/src/compositor/hyprland-plugin/psd-hyprland-plugin.so}"
 
-SHELL_PATH="$(realpath "$SHELL_PATH")"
-PLUGIN_PATH="$(realpath "$PLUGIN_PATH")"
-
 if [[ -z "${HYPRLAND_INSTANCE_SIGNATURE:-}" ]]; then
     echo "PSD live probe: this must run inside the Hyprland session being tested." >&2
     exit 1
 fi
 
-for command in hyprctl python3; do
+for command in hyprctl python3 realpath; do
     if ! command -v "$command" >/dev/null 2>&1; then
         echo "PSD live probe: missing command: $command" >&2
         exit 1
     fi
 done
 
-if [[ ! -x "$SHELL_PATH" ]]; then
-    echo "PSD live probe: shell binary not found/executable: $SHELL_PATH" >&2
+if [[ ! -e "$SHELL_PATH" ]]; then
+    echo "PSD live probe: shell binary not found: $SHELL_PATH" >&2
     exit 1
 fi
 
-if [[ ! -f "$PLUGIN_PATH" ]]; then
+if [[ ! -e "$PLUGIN_PATH" ]]; then
     echo "PSD live probe: plugin not found: $PLUGIN_PATH" >&2
     exit 1
 fi
 
-existing_shell="$(hyprctl -j layers | python3 -c 'import json,sys; d=json.load(sys.stdin); print(any(str(x.get("namespace","")).startswith("psd-shell:") for m in d.values() for level in m.get("levels",{}).values() for x in level))')"
-if [[ "$existing_shell" == "True" ]]; then
-    echo "PSD live probe: a PSD shell layer is already mapped; refusing to create a duplicate." >&2
+SHELL_PATH="$(realpath "$SHELL_PATH")"
+PLUGIN_PATH="$(realpath "$PLUGIN_PATH")"
+
+if [[ ! -x "$SHELL_PATH" ]]; then
+    echo "PSD live probe: shell binary is not executable: $SHELL_PATH" >&2
+    exit 1
+fi
+
+if [[ ! -f "$PLUGIN_PATH" ]]; then
+    echo "PSD live probe: plugin path is not a regular file: $PLUGIN_PATH" >&2
+    exit 1
+fi
+
+existing_psd_layer="$(hyprctl -j layers | python3 -c 'import json,sys; d=json.load(sys.stdin); print(any(str(x.get("namespace","")).startswith(("psd-shell:","psd-return-shield:")) for m in d.values() for level in m.get("levels",{}).values() for x in level))')"
+if [[ "$existing_psd_layer" == "True" ]]; then
+    echo "PSD live probe: a PSD shell/return-shield layer is already mapped; refusing to create a duplicate." >&2
     exit 1
 fi
 
 loaded_by_probe=0
 shell_pid=""
 log_file="${TMPDIR:-/tmp}/psd-live-session-probe.log"
+
+reset_all_monitor_offsets() {
+    if ! hyprctl -j psd-plugin >/dev/null 2>&1; then
+        return
+    fi
+
+    while IFS= read -r monitor_name; do
+        [[ -n "$monitor_name" ]] || continue
+        hyprctl dispatch plugin:psd:reset "$monitor_name" >/dev/null 2>&1 || true
+    done < <(
+        hyprctl -j monitors 2>/dev/null             | python3 -c 'import json,sys; [print(m["name"]) for m in json.load(sys.stdin) if m.get("name")]'             2>/dev/null
+    )
+}
 
 cleanup() {
     set +e
@@ -47,6 +70,11 @@ cleanup() {
         kill "$shell_pid" >/dev/null 2>&1 || true
         wait "$shell_pid" >/dev/null 2>&1 || true
     fi
+
+    # The compositor transform is experimental. Always restore every active
+    # monitor after the shell has stopped so a failed probe cannot leave a
+    # render offset behind when the plugin was already loaded by the session.
+    reset_all_monitor_offsets
 
     if [[ "$loaded_by_probe" == "1" ]]; then
         hyprctl plugin unload "$PLUGIN_PATH" >/dev/null 2>&1 || true
@@ -104,18 +132,29 @@ import sys
 
 monitors = json.loads(sys.argv[1])
 layers = json.loads(sys.argv[2])
+expected_shells = {f"psd-shell:{m['name']}" for m in monitors}
+seen_shells = []
 
 for monitor in monitors:
     name = monitor["name"]
-    expected = f"psd-shell:{name}"
+    expected_shell = f"psd-shell:{name}"
+    forbidden_shield = f"psd-return-shield:{name}"
     monitor_layers = layers.get(name, {}).get("levels", {})
-    namespaces = {
+    namespaces = [
         layer.get("namespace", "")
         for level in monitor_layers.values()
         for layer in level
-    }
-    if expected not in namespaces:
+    ]
+
+    if namespaces.count(expected_shell) != 1:
         raise SystemExit(1)
+    if forbidden_shield in namespaces:
+        raise SystemExit(1)
+
+    seen_shells.extend(ns for ns in namespaces if ns.startswith("psd-shell:"))
+
+if len(seen_shells) != len(monitors) or set(seen_shells) != expected_shells:
+    raise SystemExit(1)
 PY
     then
         ready=1
@@ -126,13 +165,13 @@ PY
 done
 
 if [[ "$ready" != "1" ]]; then
-    echo "PSD live probe: not every active monitor received its PSD layer surface." >&2
+    echo "PSD live probe: shell surfaces did not reach the expected per-monitor CENTER state." >&2
     hyprctl -j layers >&2 || true
     cat "$log_file" >&2 || true
     exit 1
 fi
 
-echo "PSD live probe: $monitor_count monitor-local shell surface(s) PASS"
+echo "PSD live probe: $monitor_count monitor-local shell surface(s), CENTER shields unmapped PASS"
 
 hyprctl dispatch plugin:psd:gesture-events 1 | grep -qx "ok"
 hyprctl dispatch plugin:psd:gesture-events 0 | grep -qx "ok"
