@@ -10,6 +10,7 @@ trap 'rm -rf "$tmp_dir"' EXIT
 mkdir -p "$tmp_dir/bin"
 mock_log="$tmp_dir/hyprctl.log"
 plugin_state="$tmp_dir/plugin-loaded"
+transform_state="$tmp_dir/transform-state.json"
 shell_ready="$tmp_dir/shell-ready"
 fake_plugin="$tmp_dir/psd-hyprland-plugin.so"
 fake_shell="$tmp_dir/psd-shell"
@@ -22,6 +23,7 @@ set -euo pipefail
 
 log="${PSD_MOCK_LOG:?}"
 plugin_state="${PSD_MOCK_PLUGIN_STATE:?}"
+transform_state="${PSD_MOCK_TRANSFORM_STATE:?}"
 shell_ready="${PSD_MOCK_SHELL_READY:?}"
 
 printf '%s\n' "$*" >>"$log"
@@ -51,13 +53,36 @@ case "$*" in
         ;;
     "-j psd-plugin")
         [[ -e "$plugin_state" ]] || exit 1
-        printf '%s\n' '{"protocolVersion":3,"pluginVersion":"0.1.0","spatialRenderOffsetExperimental":true,"monitorTargeting":true,"fourFingerGestureEventsExperimental":true,"gestureEventsDefaultEnabled":false}'
+        printf '%s\n' '{"protocolVersion":3,"pluginVersion":"0.1.0","spatialRenderOffsetExperimental":true,"monitorTargeting":true,"fourFingerGestureEventsExperimental":true,"gestureEventsDefaultEnabled":false,"diagnosticStateQueryExperimental":true}'
+        ;;
+    "-j psd-plugin-state")
+        [[ -e "$plugin_state" ]] || exit 1
+        if [[ -e "$transform_state" ]]; then
+            cat "$transform_state"
+        else
+            printf '%s\n' '{"trackedTransforms":[],"touchedWorkspaceCount":0,"workspaceSwitchResetCount":0,"gestureEventsEnabled":false,"gestureActive":false}'
+        fi
         ;;
     "-j monitors")
         printf '%s\n' '[{"id":0,"name":"DP-1","focused":true}]'
         ;;
-    "dispatch plugin:psd:gesture-events "*|"dispatch plugin:psd:offset "*|"dispatch plugin:psd:reset "*)
+    "dispatch plugin:psd:gesture-events "*)
         [[ -e "$plugin_state" ]] || exit 1
+        printf '%s\n' 'ok'
+        ;;
+    "dispatch plugin:psd:offset "*)
+        [[ -e "$plugin_state" ]] || exit 1
+        set -- $*
+        monitor="${3}"
+        x="${4}"
+        y="${5}"
+        printf '{"trackedTransforms":[{"monitor":"%s","workspaceGeneration":1,"x":%s,"y":%s}],"touchedWorkspaceCount":1,"workspaceSwitchResetCount":0,"gestureEventsEnabled":false,"gestureActive":false}\n' \
+            "$monitor" "$x" "$y" >"$transform_state"
+        printf '%s\n' 'ok'
+        ;;
+    "dispatch plugin:psd:reset "*)
+        [[ -e "$plugin_state" ]] || exit 1
+        rm -f "$transform_state"
         printf '%s\n' 'ok'
         ;;
     *)
@@ -99,6 +124,7 @@ run_probe() {
         HYPRLAND_INSTANCE_SIGNATURE=mock \
         PSD_MOCK_LOG="$mock_log" \
         PSD_MOCK_PLUGIN_STATE="$plugin_state" \
+        PSD_MOCK_TRANSFORM_STATE="$transform_state" \
         PSD_MOCK_SHELL_READY="$shell_ready" \
         "$@"
 }
@@ -106,6 +132,7 @@ run_probe() {
 # Scenario 1: the session already owns the plugin. The probe must leave it
 # loaded, but it still has to reset every monitor before returning.
 : >"$mock_log"
+rm -f "$transform_state"
 touch "$plugin_state"
 output="$(
     run_probe PSD_PROBE_EXERCISE_OFFSET=1 \
@@ -122,6 +149,7 @@ grep -q 'dispatch plugin:psd:reset DP-1' "$mock_log"
 
 # Scenario 2: the probe owns plugin load/unload and must leave no plugin state.
 : >"$mock_log"
+rm -f "$transform_state"
 rm -f "$plugin_state"
 output="$(
     run_probe bash "$probe" "$fake_shell" "$fake_plugin"
