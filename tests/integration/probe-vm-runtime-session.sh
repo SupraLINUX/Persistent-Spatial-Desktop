@@ -52,6 +52,14 @@ if [[ "${PSD_PROBE_USE_WAYLAND_BACKEND:-0}" == "1" ]]; then
 
     runtime_dir="$XDG_RUNTIME_DIR"
     unset HYPRLAND_HEADLESS_ONLY
+elif [[ "${PSD_PROBE_USE_NATIVE_BACKEND:-0}" == "1" ]]; then
+    runtime_dir="$(mktemp -d)"
+    owns_runtime_dir=1
+    export XDG_RUNTIME_DIR="$runtime_dir"
+    chmod 700 "$XDG_RUNTIME_DIR"
+    unset HYPRLAND_HEADLESS_ONLY
+    unset WAYLAND_DISPLAY
+    unset DISPLAY
 else
     runtime_dir="$(mktemp -d)"
     owns_runtime_dir=1
