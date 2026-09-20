@@ -15,6 +15,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace {
@@ -25,6 +26,7 @@ SP<HOOK_CALLBACK_FN> g_swipeBeginCallback;
 SP<HOOK_CALLBACK_FN> g_swipeUpdateCallback;
 SP<HOOK_CALLBACK_FN> g_swipeEndCallback;
 std::vector<PHLWORKSPACEREF> g_touchedWorkspaces;
+std::unordered_map<std::string, PHLWORKSPACEREF> g_monitorWorkspaces;
 
 bool g_gestureEventsEnabled = false;
 bool g_spatialGestureActive = false;
@@ -42,11 +44,36 @@ void rememberWorkspace(const PHLWORKSPACE &workspace)
         g_touchedWorkspaces.emplace_back(workspace);
 }
 
-void applyOffset(const PHLWORKSPACE &workspace, const PHLMONITOR &monitor, const Vector2D &offset)
+void applyOffset(const PHLWORKSPACE &workspace, const Vector2D &offset)
 {
+    if (!workspace || !workspace->m_renderOffset)
+        return;
+
     rememberWorkspace(workspace);
     workspace->m_renderOffset->setValueAndWarp(offset);
-    g_pHyprRenderer->damageMonitor(monitor);
+
+    const auto monitor = workspace->m_monitor.lock();
+    if (monitor)
+        g_pHyprRenderer->damageMonitor(monitor);
+}
+
+void trackWorkspaceForMonitor(const std::string &monitorName, const PHLWORKSPACE &workspace)
+{
+    if (const auto existing = g_monitorWorkspaces.find(monitorName);
+        existing != g_monitorWorkspaces.end()) {
+        const auto previousWorkspace = existing->second.lock();
+        if (previousWorkspace && previousWorkspace != workspace)
+            applyOffset(previousWorkspace, Vector2D{});
+    }
+
+    for (auto it = g_monitorWorkspaces.begin(); it != g_monitorWorkspaces.end();) {
+        if (it->first != monitorName && it->second.lock() == workspace)
+            it = g_monitorWorkspaces.erase(it);
+        else
+            ++it;
+    }
+
+    g_monitorWorkspaces[monitorName] = workspace;
 }
 
 SDispatchResult workspaceForMonitor(
@@ -87,7 +114,8 @@ SDispatchResult setOffset(std::string arguments)
     if (workspace->m_hasFullscreenWindow)
         return {.success = false, .error = "PSD: refusing non-zero render offset while the workspace contains fullscreen content"};
 
-    applyOffset(workspace, monitor, Vector2D{x, y});
+    trackWorkspaceForMonitor(monitorName, workspace);
+    applyOffset(workspace, Vector2D{x, y});
     return {};
 }
 
@@ -100,12 +128,16 @@ SDispatchResult resetOffset(std::string arguments)
     if (!(stream >> monitorName) || (stream >> trailing))
         return {.success = false, .error = "PSD: expected <monitor>"};
 
-    PHLMONITOR monitor;
-    PHLWORKSPACE workspace;
-    if (const auto result = workspaceForMonitor(monitorName, monitor, workspace); !result.success)
-        return result;
+    const auto tracked = g_monitorWorkspaces.find(monitorName);
+    if (tracked == g_monitorWorkspaces.end())
+        return {};
 
-    applyOffset(workspace, monitor, Vector2D{});
+    const auto workspace = tracked->second.lock();
+    g_monitorWorkspaces.erase(tracked);
+
+    if (workspace)
+        applyOffset(workspace, Vector2D{});
+
     return {};
 }
 
@@ -223,16 +255,11 @@ void resetTouchedWorkspaces()
 {
     for (const PHLWORKSPACEREF &weak : g_touchedWorkspaces) {
         const auto workspace = weak.lock();
-        if (!workspace || !workspace->m_renderOffset)
-            continue;
-
-        workspace->m_renderOffset->setValueAndWarp(Vector2D{});
-
-        const auto monitor = workspace->m_monitor.lock();
-        if (monitor)
-            g_pHyprRenderer->damageMonitor(monitor);
+        if (workspace)
+            applyOffset(workspace, Vector2D{});
     }
 
+    g_monitorWorkspaces.clear();
     g_touchedWorkspaces.clear();
 }
 
