@@ -235,6 +235,17 @@ def points(path):
 baseline = points(baseline_path)
 candidate = points(candidate_path)
 
+def bbox(points_set):
+    xs = [x for x, _ in points_set]
+    ys = [y for _, y in points_set]
+    return (min(xs), min(ys), max(xs), max(ys))
+
+print(
+    f"PSD render probe: {label} mask diagnostic "
+    f"baselineBBox={bbox(baseline)} candidateBBox={bbox(candidate)} "
+    f"baselinePixels={len(baseline)} candidatePixels={len(candidate)}"
+)
+
 best_dx = None
 best_overlap = -1
 
@@ -374,11 +385,51 @@ PY
     hyprctl dispatch plugin:psd:offset "$monitor_name $logical_offset 0" | grep -qx "ok"
     sleep 0.2
 
-    if [[ "$mode" != "tiled" ]]; then
-        local floating_state
-        floating_state="$(hyprctl -j psd-plugin-state)"
+    local compositor_state
+    local client_state
+    compositor_state="$(hyprctl -j psd-plugin-state)"
+    client_state="$(hyprctl -j clients)"
 
-        python3 - "$floating_state" "$mode" "$logical_offset" <<'PY'
+    python3 - "$compositor_state" "$client_state" "$mode" "$target_title" "$logical_offset" <<'PY'
+import json
+import sys
+
+state = json.loads(sys.argv[1])
+clients = json.loads(sys.argv[2])
+mode = sys.argv[3]
+title = sys.argv[4]
+expected = float(sys.argv[5])
+
+transforms = state.get("trackedTransforms", [])
+if len(transforms) != 1:
+    raise SystemExit(f"PSD render probe: {mode} unexpected transform state: {state}")
+
+transform = transforms[0]
+client = next((item for item in clients if item.get("title") == title), None)
+if client is None:
+    raise SystemExit(f"PSD render probe: {mode} client disappeared")
+
+workspace = client.get("workspace", {})
+print(
+    "PSD render probe: "
+    f"{mode} workspace diagnostic "
+    f"clientWorkspace={workspace.get('name')} "
+    f"trackedWorkspace={transform.get('workspace')} "
+    f"requested=({transform.get('requestedX')},{transform.get('requestedY')}) "
+    f"actual=({transform.get('actualX')},{transform.get('actualY')}) "
+    f"goal=({transform.get('goalX')},{transform.get('goalY')}) "
+    f"animated={transform.get('animated')}"
+)
+
+if str(workspace.get("name", "")) != str(transform.get("workspace", "")):
+    raise SystemExit(
+        f"PSD render probe: {mode} client/tracked workspace mismatch: "
+        f"client={workspace} transform={transform}"
+    )
+PY
+
+    if [[ "$mode" != "tiled" ]]; then
+        python3 - "$compositor_state" "$mode" "$logical_offset" <<'PY'
 import json
 import sys
 

@@ -435,12 +435,32 @@ std::string stateResponse(eHyprCtlOutputFormat format, std::string)
             transforms += ',';
         first = false;
 
+        const auto workspace = state.workspace.lock();
+        const Vector2D actual =
+            workspace && workspace->m_renderOffset
+            ? workspace->m_renderOffset->value()
+            : Vector2D{};
+        const Vector2D goal =
+            workspace && workspace->m_renderOffset
+            ? workspace->m_renderOffset->goal()
+            : Vector2D{};
+        const bool animated =
+            workspace && workspace->m_renderOffset
+            ? workspace->m_renderOffset->isBeingAnimated()
+            : false;
+
         transforms += std::format(
-            R"json({{"monitor":"{}","workspaceGeneration":{},"x":{:.6f},"y":{:.6f}}})json",
+            R"json({{"monitor":"{}","workspace":"{}","workspaceGeneration":{},"requestedX":{:.6f},"requestedY":{:.6f},"actualX":{:.6f},"actualY":{:.6f},"goalX":{:.6f},"goalY":{:.6f},"animated":{}}})json",
             jsonEscape(monitorName),
+            workspace ? jsonEscape(workspace->m_name) : std::string{},
             state.workspaceGeneration,
             state.offset.x,
-            state.offset.y);
+            state.offset.y,
+            actual.x,
+            actual.y,
+            goal.x,
+            goal.y,
+            animated ? "true" : "false");
     }
 
     std::string presentationOffsets;
@@ -471,7 +491,7 @@ std::string stateResponse(eHyprCtlOutputFormat format, std::string)
     }
 
     return std::format(
-        R"json({{"trackedTransforms":[{}],"touchedWorkspaceCount":{},"trackedFloatingWindowCount":{},"presentationOffsets":[{}],"workspaceSwitchResetCount":{},"gestureEventsEnabled":{},"gestureActive":{}}})json",
+        R"json({{"trackedTransforms":[{}],"touchedWorkspaceCount":{},"trackedPresentationWindowCount":{},"presentationOffsets":[{}],"workspaceSwitchResetCount":{},"gestureEventsEnabled":{},"gestureActive":{}}})json",
         transforms,
         g_touchedWorkspaces.size(),
         std::accumulate(
