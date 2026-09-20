@@ -317,6 +317,64 @@ run_case() {
             exit 1
         fi
 
+        # togglefloating preserves the former tiled geometry. On a one-window
+        # workspace that can be essentially monitor-sized, making translation
+        # correlation ambiguous: a uniform full-screen rectangle shifted and
+        # clipped still correlates perfectly at dx=0. Force a compact,
+        # centered floating geometry so the pixel test has visible margins on
+        # both sides and can distinguish 0 from +/-96 unambiguously.
+        hyprctl dispatch focuswindow "title:^$target_title$" | grep -qx "ok"
+        hyprctl dispatch resizeactive "exact 480 320" | grep -qx "ok"
+        hyprctl dispatch centerwindow | grep -qx "ok"
+
+        floating_geometry_ready=0
+        for _ in $(seq 1 60); do
+            geometry_now="$(client_geometry "$target_title" || true)"
+            if python3 - "$geometry_now" "$monitor_x" "$monitor_y" "$monitor_width" "$monitor_height" "$monitor_scale" <<'PY' >/dev/null 2>&1
+import sys
+
+if not sys.argv[1]:
+    raise SystemExit(1)
+
+x, y, w, h = map(int, sys.argv[1].split(","))
+monitor_x = int(sys.argv[2])
+monitor_y = int(sys.argv[3])
+monitor_width = int(sys.argv[4])
+monitor_height = int(sys.argv[5])
+scale = float(sys.argv[6])
+
+logical_width = monitor_width / scale
+logical_height = monitor_height / scale
+
+if abs(w - 480) > 4 or abs(h - 320) > 4:
+    raise SystemExit(1)
+
+left_margin = x - monitor_x
+right_margin = monitor_x + logical_width - (x + w)
+top_margin = y - monitor_y
+bottom_margin = monitor_y + logical_height - (y + h)
+
+# Leave substantially more than the 96-unit test translation on every side.
+if min(left_margin, right_margin) < 160:
+    raise SystemExit(1)
+if min(top_margin, bottom_margin) < 80:
+    raise SystemExit(1)
+PY
+            then
+                floating_geometry_ready=1
+                break
+            fi
+            sleep 0.1
+        done
+
+        if [[ "$floating_geometry_ready" != "1" ]]; then
+            echo "PSD render probe: $mode target did not settle to compact centered floating geometry." >&2
+            hyprctl -j clients >&2 || true
+            exit 1
+        fi
+
+        echo "PSD render probe: $mode compact floating geometry $geometry_now PASS"
+
         if [[ "$mode" == "pinned" ]]; then
             hyprctl dispatch focuswindow "title:^$target_title$" | grep -qx "ok"
             hyprctl dispatch pin active | grep -qx "ok"
