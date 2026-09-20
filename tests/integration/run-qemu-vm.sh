@@ -248,18 +248,61 @@ ssh_guest '
     cmake --build build-hypr --target psd-hyprland-plugin --parallel 2
 '
 
-echo "PSD QEMU probe: running compositor plugin smoke inside VM"
+echo "PSD QEMU probe: running Hyprland nested on Weston headless inside VM"
 ssh_guest '
-    set -e
+    set -euo pipefail
     cd /home/psd/src
-    bash tests/integration/probe-hyprland-plugin.sh         build-hypr/src/compositor/hyprland-plugin/psd-hyprland-plugin.so         tests/integration/hyprland-headless.conf
-'
 
-echo "PSD QEMU probe: running shell/compositor lifecycle inside VM"
-ssh_guest '
-    set -e
-    cd /home/psd/src
-    bash tests/integration/probe-vm-runtime-session.sh         build/psd-shell         build-hypr/src/compositor/hyprland-plugin/psd-hyprland-plugin.so         tests/integration/hyprland-headless.conf
+    nested_runtime="$(mktemp -d)"
+    weston_log="/tmp/psd-weston-headless.log"
+    weston_pid=""
+
+    cleanup_nested() {
+        set +e
+        if [[ -n "$weston_pid" ]]; then
+            kill "$weston_pid" >/dev/null 2>&1 || true
+            wait "$weston_pid" >/dev/null 2>&1 || true
+        fi
+        rm -rf "$nested_runtime"
+    }
+    trap cleanup_nested EXIT
+
+    export XDG_RUNTIME_DIR="$nested_runtime"
+    chmod 700 "$XDG_RUNTIME_DIR"
+    export WAYLAND_DISPLAY=wayland-psd
+    export LIBGL_ALWAYS_SOFTWARE=1
+    export GALLIUM_DRIVER=llvmpipe
+
+    weston --backend=headless --renderer=pixman --socket="$WAYLAND_DISPLAY" --idle-time=0 --width=1920 --height=1080 --no-config >"$weston_log" 2>&1 &
+    weston_pid=$!
+
+    weston_ready=0
+    for _ in $(seq 1 100); do
+        if [[ -S "$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY" ]]; then
+            weston_ready=1
+            break
+        fi
+
+        if ! kill -0 "$weston_pid" >/dev/null 2>&1; then
+            echo "PSD QEMU probe: Weston exited before Wayland socket became ready" >&2
+            cat "$weston_log" >&2 || true
+            exit 1
+        fi
+
+        sleep 0.1
+    done
+
+    if [[ "$weston_ready" != "1" ]]; then
+        echo "PSD QEMU probe: Weston Wayland socket did not become ready" >&2
+        cat "$weston_log" >&2 || true
+        exit 1
+    fi
+
+    echo "PSD QEMU probe: nested Weston ready on $WAYLAND_DISPLAY"
+
+    PSD_PROBE_USE_WAYLAND_BACKEND=1 bash tests/integration/probe-hyprland-plugin.sh build-hypr/src/compositor/hyprland-plugin/psd-hyprland-plugin.so tests/integration/hyprland-headless.conf
+
+    PSD_PROBE_USE_WAYLAND_BACKEND=1 bash tests/integration/probe-vm-runtime-session.sh build/psd-shell build-hypr/src/compositor/hyprland-plugin/psd-hyprland-plugin.so tests/integration/hyprland-headless.conf
 '
 
 echo "PSD QEMU probe: PASS"
