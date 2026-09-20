@@ -141,6 +141,27 @@ echo "PSD VM runtime probe: using guest DRM render node(s):"
 ls -l /dev/dri/renderD*
 echo "PSD VM runtime probe: using Hyprland output $monitor_name"
 
-PSD_PROBE_EXERCISE_RUNTIME=1     bash "$(dirname "$0")/probe-live-session.sh" "$SHELL_PATH" "$PLUGIN_PATH"
+if [[ "${PSD_PROBE_USE_NATIVE_BACKEND:-0}" == "1" ]]; then
+    wayland_socket=""
+    for _ in $(seq 1 50); do
+        wayland_socket="$(find "$XDG_RUNTIME_DIR" -maxdepth 3 -type s -name 'wayland-*' 2>/dev/null | head -n1 || true)"
+        [[ -n "$wayland_socket" ]] && break
+        sleep 0.1
+    done
+
+    if [[ -z "$wayland_socket" || ! -S "$wayland_socket" ]]; then
+        echo "PSD VM runtime probe: Hyprland Wayland socket not found." >&2
+        find "$XDG_RUNTIME_DIR" -maxdepth 3 -type s -print >&2 2>/dev/null || true
+        cat "$log_file" >&2 || true
+        exit 1
+    fi
+
+    export WAYLAND_DISPLAY="$wayland_socket"
+    export QT_QPA_PLATFORM=wayland
+    echo "PSD VM runtime probe: shell Wayland socket $WAYLAND_DISPLAY"
+fi
+
+PSD_PROBE_EXERCISE_RUNTIME=1 \
+    bash "$(dirname "$0")/probe-live-session.sh" "$SHELL_PATH" "$PLUGIN_PATH"
 
 echo "PSD VM runtime probe: PASS"
