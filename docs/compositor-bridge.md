@@ -102,4 +102,23 @@ That phase should use the narrowest compositor-side integration capable of:
 
 A PSD-specific Hyprland plugin now exists as an experiment behind the same compositor abstraction. It can apply `CWorkspace::m_renderOffset` to the active regular workspace of a named monitor. This remains a proof of concept, not an accepted production mechanism.
 
+The internal transform command contract is now also compositor-generic: `SpatialCompositorSync` talks to `CompositorBridge`, not directly to `HyprlandIpcBridge`. Each transform command receives an internal command ID so completion from an unrelated or stale request cannot accidentally release another monitor-local command queue.
+
+### Transform lifecycle safety
+
+A monitor-local transform sync permits at most one compositor command in flight. Intermediate animation/gesture offsets are coalesced to the latest pending value.
+
+Disabling the sync does not send a reset in parallel with an existing offset. Instead it:
+
+1. stops accepting new pending offsets;
+2. waits for the identified in-flight command to complete;
+3. sends a final reset;
+4. considers the monitor settled only after that reset is confirmed.
+
+Normal shell shutdown uses the same lifecycle with a bounded drain period. SIGTERM/SIGINT are converted into an orderly Qt shutdown so the reset path can run before process exit.
+
+The Hyprland plugin also tracks the exact workspace transformed by PSD for each monitor. `plugin:psd:reset <monitor>` resets that tracked workspace rather than whichever workspace happens to be active when the reset arrives. If the active workspace changes while PSD owns an offset, the previous tracked workspace is reset before the new workspace can become the transform target. Plugin unload still resets every workspace touched by the experiment.
+
+These safeguards reduce residual-offset risk during normal shutdown, workspace changes and monitor teardown. They do not make the experiment crash-proof against SIGKILL, compositor crashes or machine loss; those remain part of real-session fault testing.
+
 Do not emulate the final spatial transform by repeatedly moving each client window through public dispatchers unless implementation evidence proves there is no better compositor-level path.
