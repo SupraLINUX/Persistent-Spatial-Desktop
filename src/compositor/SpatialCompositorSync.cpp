@@ -31,6 +31,14 @@ SpatialCompositorSync::SpatialCompositorSync(
     connect(m_bridge, &CompositorBridge::availableChanged,
             this, &SpatialCompositorSync::handleBridgeAvailabilityChanged);
 
+    connect(m_bridge, &CompositorBridge::monitorsChanged, this, [this] {
+        const QPointF currentOffset = m_motion->offset();
+        if (active()
+            && (!qFuzzyIsNull(currentOffset.x()) || !qFuzzyIsNull(currentOffset.y()))) {
+            queueCurrentOffset();
+        }
+    });
+
     connect(m_bridge, &CompositorBridge::spatialTransformCommandFinished,
             this,
             [this](
