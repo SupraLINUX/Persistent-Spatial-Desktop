@@ -39,9 +39,26 @@ if ! compgen -G "/dev/dri/renderD*" >/dev/null; then
     exit 77
 fi
 
-runtime_dir="$(mktemp -d)"
+runtime_dir=""
+owns_runtime_dir=0
 log_file="${TMPDIR:-/tmp}/psd-hyprland-vm-runtime.log"
 hyprland_pid=""
+
+if [[ "${PSD_PROBE_USE_WAYLAND_BACKEND:-0}" == "1" ]]; then
+    if [[ -z "${XDG_RUNTIME_DIR:-}" || -z "${WAYLAND_DISPLAY:-}" ]]; then
+        echo "PSD VM runtime probe: nested Wayland mode requires XDG_RUNTIME_DIR and WAYLAND_DISPLAY." >&2
+        exit 1
+    fi
+
+    runtime_dir="$XDG_RUNTIME_DIR"
+    unset HYPRLAND_HEADLESS_ONLY
+else
+    runtime_dir="$(mktemp -d)"
+    owns_runtime_dir=1
+    export XDG_RUNTIME_DIR="$runtime_dir"
+    chmod 700 "$XDG_RUNTIME_DIR"
+    export HYPRLAND_HEADLESS_ONLY=1
+fi
 
 cleanup() {
     set +e
@@ -55,13 +72,11 @@ cleanup() {
         wait "$hyprland_pid" >/dev/null 2>&1 || true
     fi
 
-    rm -rf "$runtime_dir"
+    if [[ "$owns_runtime_dir" == "1" ]]; then
+        rm -rf "$runtime_dir"
+    fi
 }
 trap cleanup EXIT
-
-export XDG_RUNTIME_DIR="$runtime_dir"
-chmod 700 "$XDG_RUNTIME_DIR"
-export HYPRLAND_HEADLESS_ONLY=1
 
 Hyprland --i-am-really-stupid --config "$CONFIG_PATH" >"$log_file" 2>&1 &
 hyprland_pid=$!
