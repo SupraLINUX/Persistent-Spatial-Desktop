@@ -894,9 +894,38 @@ PY
 
         kill -TERM "$fullscreen_pid" >/dev/null 2>&1 || true
         wait "$fullscreen_pid" >/dev/null 2>&1 || true
+
+        fullscreen_client_gone=0
+        for _ in $(seq 1 50); do
+            clients_json="$(hyprctl -j clients)"
+            if python3 - "$clients_json" "$fullscreen_title" <<'PY' >/dev/null 2>&1
+import json
+import sys
+
+clients = json.loads(sys.argv[1])
+title = sys.argv[2]
+raise SystemExit(0 if all(c.get("title") != title for c in clients) else 1)
+PY
+            then
+                fullscreen_client_gone=1
+                break
+            fi
+            sleep 0.1
+        done
+
+        if [[ "$fullscreen_client_gone" != "1" ]]; then
+            echo "PSD live probe: fullscreen client process exited but Hyprland still reports the window." >&2
+            hyprctl -j clients >&2 || true
+            exit 1
+        fi
+
+        echo "PSD live probe: fullscreen client removal observed by compositor PASS"
     fi
 
     if [[ "${PSD_PROBE_EXERCISE_PLUGIN_LIFECYCLE:-0}" == "1" ]]; then
+        # Move only after Hyprland has removed the former fullscreen client.
+        # Otherwise the one cursor transition can still be delivered to that
+        # dying surface instead of the remapped PSD gutter.
         hyprctl dispatch movecursor "$runtime_center_x $runtime_center_y" | grep -qx "ok"
         sleep 0.1
         hyprctl dispatch movecursor "$runtime_edge_x $runtime_edge_y" | grep -qx "ok"
@@ -941,6 +970,8 @@ PY
             plugin_state >&2 || true
             exit 1
         fi
+
+        echo "PSD live probe: post-fullscreen gutter navigation + compositor transform PASS"
 
         sleep 0.6
         hyprctl plugin unload "$PLUGIN_PATH" | grep -qx "ok"
