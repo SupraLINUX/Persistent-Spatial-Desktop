@@ -85,9 +85,13 @@ It then connects to Hyprland's documented command and event UNIX sockets.
 - monitor/workspace/window normalization;
 - live event socket;
 - opt-in four-finger swipe event bridge from the Hyprland plugin into the monitor-local motion controller;
+- compositor-generic transform commands behind `CompositorBridge`, with command IDs and per-monitor serialization;
+- final-reset draining when experimental sync is disabled, a monitor disappears, or the shell exits normally;
+- SIGTERM/SIGINT conversion into orderly Qt shutdown so compositor cleanup can run;
+- plugin-side tracking of the exact workspace PSD transformed, avoiding reset of the wrong active workspace;
 - event-coalesced state refreshes;
 - no compositor polling loop;
-- unit tests for tokens, spatial state, responsive geometry, motion authority and Hyprland protocol parsing.
+- unit tests for tokens, spatial state, responsive geometry, motion authority, Hyprland protocol parsing and compositor reset sequencing.
 
 ## Current compositor boundary
 
