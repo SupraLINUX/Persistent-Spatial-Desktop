@@ -450,10 +450,12 @@ std::string stateResponse(eHyprCtlOutputFormat format, std::string)
             : false;
 
         transforms += std::format(
-            R"json({{"monitor":"{}","workspace":"{}","workspaceGeneration":{},"requestedX":{:.6f},"requestedY":{:.6f},"actualX":{:.6f},"actualY":{:.6f},"goalX":{:.6f},"goalY":{:.6f},"animated":{}}})json",
+            R"json({{"monitor":"{}","workspace":"{}","workspaceGeneration":{},"x":{:.6f},"y":{:.6f},"requestedX":{:.6f},"requestedY":{:.6f},"actualX":{:.6f},"actualY":{:.6f},"goalX":{:.6f},"goalY":{:.6f},"animated":{}}})json",
             jsonEscape(monitorName),
             workspace ? jsonEscape(workspace->m_name) : std::string{},
             state.workspaceGeneration,
+            state.offset.x,
+            state.offset.y,
             state.offset.x,
             state.offset.y,
             actual.x,
