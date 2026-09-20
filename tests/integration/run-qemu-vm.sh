@@ -216,7 +216,8 @@ echo "PSD QEMU probe: installing Ubuntu 26.04 guest dependencies"
 ssh_guest '
     set -e
     sudo apt-get update
-    sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends         ca-certificates         build-essential         cmake         git         ninja-build         pkgconf         python3         qt6-base-dev         qt6-declarative-dev         qt6-wayland         liblayershellqtinterface-dev         hyprland         hyprland-dev         libgles-dev         xdg-desktop-portal-hyprland
+    sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends         ca-certificates         build-essential         cmake         git         ninja-build         pkgconf         python3         qt6-base-dev         qt6-declarative-dev         qt6-wayland         liblayershellqtinterface-dev         hyprland         hyprland-dev         libgles-dev         weston \
+        xdg-desktop-portal-hyprland
 '
 
 echo "PSD QEMU probe: guest kernel/DRM state"
