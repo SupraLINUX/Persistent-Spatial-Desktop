@@ -62,6 +62,16 @@ QString HyprlandIpcBridge::instanceSignature() const
     return m_instanceSignature;
 }
 
+bool HyprlandIpcBridge::spatialTransformAvailable() const
+{
+    if (!available())
+        return false;
+
+    const QVariantMap currentCapabilities = capabilities();
+    return currentCapabilities.value(QStringLiteral("spatialRenderOffsetExperimental")).toBool()
+        && currentCapabilities.value(QStringLiteral("monitorTargeting")).toBool();
+}
+
 void HyprlandIpcBridge::start()
 {
     discoverInstance();
@@ -109,12 +119,20 @@ void HyprlandIpcBridge::refreshCapabilities()
     }, false);
 }
 
-void HyprlandIpcBridge::setExperimentalSpatialOffset(const QString &monitorName, double x, double y)
+quint64 HyprlandIpcBridge::setSpatialTransformOffset(
+    const QString &monitorName, double x, double y)
 {
-    if (!capabilities().value(QStringLiteral("spatialRenderOffsetExperimental")).toBool()) {
-        emit experimentalSpatialCommandFinished(
-            monitorName, false, QStringLiteral("PSD Hyprland spatial plugin capability is unavailable"));
-        return;
+    const quint64 commandId = allocateSpatialTransformCommandId();
+
+    if (!spatialTransformAvailable()) {
+        QTimer::singleShot(0, this, [this, commandId, monitorName] {
+            emit spatialTransformCommandFinished(
+                commandId,
+                monitorName,
+                false,
+                QStringLiteral("PSD Hyprland spatial plugin capability is unavailable"));
+        });
+        return commandId;
     }
 
     const QByteArray request =
@@ -125,27 +143,38 @@ void HyprlandIpcBridge::setExperimentalSpatialOffset(const QString &monitorName,
         + ' '
         + QByteArray::number(y, 'f', 3);
 
-    requestText(request, [this, monitorName](const QByteArray &response) {
+    requestText(request, [this, commandId, monitorName](const QByteArray &response) {
         const QString result = QString::fromUtf8(response).trimmed();
         const bool success = result == QStringLiteral("ok");
-        emit experimentalSpatialCommandFinished(monitorName, success, result);
+        emit spatialTransformCommandFinished(commandId, monitorName, success, result);
     });
+
+    return commandId;
 }
 
-void HyprlandIpcBridge::resetExperimentalSpatialOffset(const QString &monitorName)
+quint64 HyprlandIpcBridge::resetSpatialTransformOffset(const QString &monitorName)
 {
-    if (!capabilities().value(QStringLiteral("spatialRenderOffsetExperimental")).toBool()) {
-        emit experimentalSpatialCommandFinished(
-            monitorName, false, QStringLiteral("PSD Hyprland spatial plugin capability is unavailable"));
-        return;
+    const quint64 commandId = allocateSpatialTransformCommandId();
+
+    if (!spatialTransformAvailable()) {
+        QTimer::singleShot(0, this, [this, commandId, monitorName] {
+            emit spatialTransformCommandFinished(
+                commandId,
+                monitorName,
+                false,
+                QStringLiteral("PSD Hyprland spatial plugin capability is unavailable"));
+        });
+        return commandId;
     }
 
     requestText(QByteArrayLiteral("dispatch plugin:psd:reset ") + monitorName.toUtf8(),
-                [this, monitorName](const QByteArray &response) {
+                [this, commandId, monitorName](const QByteArray &response) {
         const QString result = QString::fromUtf8(response).trimmed();
         const bool success = result == QStringLiteral("ok");
-        emit experimentalSpatialCommandFinished(monitorName, success, result);
+        emit spatialTransformCommandFinished(commandId, monitorName, success, result);
     });
+
+    return commandId;
 }
 
 void HyprlandIpcBridge::discoverInstance()
