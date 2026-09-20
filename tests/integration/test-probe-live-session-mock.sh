@@ -53,7 +53,7 @@ case "$*" in
         ;;
     "-j psd-plugin")
         [[ -e "$plugin_state" ]] || exit 1
-        printf '%s\n' '{"protocolVersion":3,"pluginVersion":"0.1.0","spatialRenderOffsetExperimental":true,"monitorTargeting":true,"fourFingerGestureEventsExperimental":true,"gestureEventsDefaultEnabled":false,"diagnosticStateQueryExperimental":true}'
+        printf '%s\n' '{"protocolVersion":3,"pluginVersion":"0.1.1","spatialRenderOffsetExperimental":true,"monitorTargeting":true,"fourFingerGestureEventsExperimental":true,"gestureEventsDefaultEnabled":false,"diagnosticStateQueryExperimental":true,"lifecycleEventsExperimental":true}'
         ;;
     "-j psd-plugin-state")
         [[ -e "$plugin_state" ]] || exit 1
