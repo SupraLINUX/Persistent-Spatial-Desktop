@@ -48,6 +48,15 @@ fi
 loaded_by_probe=0
 shell_pid=""
 log_file="${TMPDIR:-/tmp}/psd-live-session-probe.log"
+runtime_restore_needed=0
+runtime_monitor=""
+runtime_workspace_selector=""
+runtime_cursor_x=""
+runtime_cursor_y=""
+
+plugin_state() {
+    hyprctl -j psd-plugin-state
+}
 
 reset_all_monitor_offsets() {
     if ! hyprctl -j psd-plugin >/dev/null 2>&1; then
@@ -58,8 +67,30 @@ reset_all_monitor_offsets() {
         [[ -n "$monitor_name" ]] || continue
         hyprctl dispatch plugin:psd:reset "$monitor_name" >/dev/null 2>&1 || true
     done < <(
-        hyprctl -j monitors 2>/dev/null             | python3 -c 'import json,sys; [print(m["name"]) for m in json.load(sys.stdin) if m.get("name")]'             2>/dev/null
+        hyprctl -j monitors 2>/dev/null \
+            | python3 -c 'import json,sys; [print(m["name"]) for m in json.load(sys.stdin) if m.get("name")]' \
+            2>/dev/null
     )
+}
+
+restore_runtime_context() {
+    if [[ "$runtime_restore_needed" != "1" ]]; then
+        return
+    fi
+
+    if [[ -n "$runtime_monitor" ]]; then
+        hyprctl dispatch focusmonitor "$runtime_monitor" >/dev/null 2>&1 || true
+    fi
+
+    if [[ -n "$runtime_workspace_selector" ]]; then
+        hyprctl dispatch workspace "$runtime_workspace_selector" >/dev/null 2>&1 || true
+    fi
+
+    if [[ -n "$runtime_cursor_x" && -n "$runtime_cursor_y" ]]; then
+        hyprctl dispatch movecursor "$runtime_cursor_x $runtime_cursor_y" >/dev/null 2>&1 || true
+    fi
+
+    runtime_restore_needed=0
 }
 
 cleanup() {
@@ -67,7 +98,7 @@ cleanup() {
     hyprctl dispatch plugin:psd:gesture-events 0 >/dev/null 2>&1 || true
 
     if [[ -n "$shell_pid" ]]; then
-        kill "$shell_pid" >/dev/null 2>&1 || true
+        kill -TERM "$shell_pid" >/dev/null 2>&1 || true
         wait "$shell_pid" >/dev/null 2>&1 || true
     fi
 
@@ -75,6 +106,7 @@ cleanup() {
     # monitor after the shell has stopped so a failed probe cannot leave a
     # render offset behind when the plugin was already loaded by the session.
     reset_all_monitor_offsets
+    restore_runtime_context
 
     if [[ "$loaded_by_probe" == "1" ]]; then
         hyprctl plugin unload "$PLUGIN_PATH" >/dev/null 2>&1 || true
@@ -99,7 +131,19 @@ assert data["spatialRenderOffsetExperimental"] is True, data
 assert data["monitorTargeting"] is True, data
 assert data["fourFingerGestureEventsExperimental"] is True, data
 assert data["gestureEventsDefaultEnabled"] is False, data
+assert data["diagnosticStateQueryExperimental"] is True, data
 print("PSD live probe: plugin capability handshake PASS")
+PY
+
+initial_plugin_state="$(plugin_state)"
+python3 - "$initial_plugin_state" <<'PY'
+import json
+import sys
+
+data = json.loads(sys.argv[1])
+assert data["trackedTransforms"] == [], data
+assert data["gestureActive"] is False, data
+print("PSD live probe: initial plugin state clean PASS")
 PY
 
 monitor_json="$(hyprctl -j monitors)"
@@ -113,6 +157,14 @@ if [[ "$monitor_count" -lt 1 ]]; then
     echo "PSD live probe: Hyprland reports no active monitors." >&2
     exit 1
 fi
+
+primary_monitor="$(python3 - "$monitor_json" <<'PY'
+import json, sys
+monitors = json.loads(sys.argv[1])
+focused = next((m for m in monitors if m.get("focused")), monitors[0])
+print(focused["name"])
+PY
+)"
 
 PSD_EXPERIMENTAL_HYPRLAND_SYNC=1 "$SHELL_PATH" >"$log_file" 2>&1 &
 shell_pid=$!
@@ -178,18 +230,249 @@ hyprctl dispatch plugin:psd:gesture-events 0 | grep -qx "ok"
 echo "PSD live probe: four-finger gesture arm/disarm PASS"
 
 if [[ "${PSD_PROBE_EXERCISE_OFFSET:-0}" == "1" ]]; then
-    primary_monitor="$(python3 - "$monitor_json" <<'PY'
-import json, sys
+    hyprctl dispatch plugin:psd:offset "$primary_monitor 24 0" | grep -qx "ok"
+
+    offset_state="$(plugin_state)"
+    python3 - "$offset_state" "$primary_monitor" <<'PY'
+import json
+import math
+import sys
+
+data = json.loads(sys.argv[1])
+monitor = sys.argv[2]
+matches = [x for x in data["trackedTransforms"] if x["monitor"] == monitor]
+assert len(matches) == 1, data
+transform = matches[0]
+assert math.isclose(transform["x"], 24.0, abs_tol=0.01), transform
+assert math.isclose(transform["y"], 0.0, abs_tol=0.01), transform
+assert transform["workspaceGeneration"] > 0, transform
+PY
+
+    hyprctl dispatch plugin:psd:reset "$primary_monitor" | grep -qx "ok"
+
+    reset_state="$(plugin_state)"
+    python3 - "$reset_state" "$primary_monitor" <<'PY'
+import json
+import sys
+
+data = json.loads(sys.argv[1])
+monitor = sys.argv[2]
+assert all(x["monitor"] != monitor for x in data["trackedTransforms"]), data
+PY
+
+    echo "PSD live probe: explicit offset/state/reset on $primary_monitor PASS"
+fi
+
+if [[ "${PSD_PROBE_EXERCISE_RUNTIME:-0}" == "1" ]]; then
+    runtime_monitor="$primary_monitor"
+
+    runtime_workspace_selector="$(python3 - "$monitor_json" "$primary_monitor" <<'PY'
+import json
+import sys
+
 monitors = json.loads(sys.argv[1])
-focused = next((m for m in monitors if m.get("focused")), monitors[0])
-print(focused["name"])
+monitor_name = sys.argv[2]
+monitor = next(m for m in monitors if m["name"] == monitor_name)
+workspace = monitor.get("activeWorkspace", {})
+name = str(workspace.get("name", "")).strip()
+
+if not name:
+    raise SystemExit("focused monitor has no active workspace name")
+
+print(name if name.isdigit() else f"name:{name}")
 PY
 )"
 
-    hyprctl dispatch plugin:psd:offset "$primary_monitor 24 0" | grep -qx "ok"
-    sleep 0.15
-    hyprctl dispatch plugin:psd:reset "$primary_monitor" | grep -qx "ok"
-    echo "PSD live probe: explicit offset/reset on $primary_monitor PASS"
+    cursor_json="$(hyprctl -j cursorpos)"
+    read -r runtime_cursor_x runtime_cursor_y < <(
+        python3 - "$cursor_json" <<'PY'
+import json
+import sys
+
+cursor = json.loads(sys.argv[1])
+print(cursor["x"], cursor["y"])
+PY
+    )
+
+    read -r runtime_center_x runtime_center_y runtime_edge_x runtime_edge_y < <(
+        python3 - "$monitor_json" "$primary_monitor" <<'PY'
+import json
+import sys
+
+monitors = json.loads(sys.argv[1])
+monitor_name = sys.argv[2]
+monitor = next(m for m in monitors if m["name"] == monitor_name)
+
+scale = float(monitor.get("scale", 1.0) or 1.0)
+width = float(monitor["width"]) / scale
+height = float(monitor["height"]) / scale
+x = float(monitor.get("x", 0))
+y = float(monitor.get("y", 0))
+
+print(
+    round(x + width * 0.5),
+    round(y + height * 0.5),
+    round(x + 1),
+    round(y + height * 0.5),
+)
+PY
+    )
+
+    runtime_restore_needed=1
+    probe_workspace_a="psd-probe-$$-a"
+    probe_workspace_b="psd-probe-$$-b"
+
+    hyprctl dispatch focusmonitor "$primary_monitor" | grep -qx "ok"
+    hyprctl dispatch workspace "name:$probe_workspace_a" | grep -qx "ok"
+
+    hyprctl dispatch movecursor "$runtime_center_x $runtime_center_y" | grep -qx "ok"
+    sleep 0.1
+    hyprctl dispatch movecursor "$runtime_edge_x $runtime_edge_y" | grep -qx "ok"
+
+    displaced=0
+    first_generation=""
+    first_reset_count=""
+
+    for _ in $(seq 1 40); do
+        layers_json="$(hyprctl -j layers)"
+        state_json="$(plugin_state)"
+
+        if read -r first_generation first_reset_count < <(
+            python3 - "$layers_json" "$state_json" "$primary_monitor" <<'PY'
+import json
+import sys
+
+layers = json.loads(sys.argv[1])
+state = json.loads(sys.argv[2])
+monitor = sys.argv[3]
+
+namespaces = {
+    layer.get("namespace", "")
+    for level in layers.get(monitor, {}).get("levels", {}).values()
+    for layer in level
+}
+if f"psd-return-shield:{monitor}" not in namespaces:
+    raise SystemExit(1)
+
+matches = [x for x in state["trackedTransforms"] if x["monitor"] == monitor]
+if len(matches) != 1:
+    raise SystemExit(1)
+
+transform = matches[0]
+if abs(float(transform["x"])) < 1.0 and abs(float(transform["y"])) < 1.0:
+    raise SystemExit(1)
+
+print(transform["workspaceGeneration"], state["workspaceSwitchResetCount"])
+PY
+        ); then
+            displaced=1
+            break
+        fi
+
+        sleep 0.1
+    done
+
+    if [[ "$displaced" != "1" ]]; then
+        echo "PSD live probe: gutter navigation did not produce a displaced runtime state." >&2
+        hyprctl -j layers >&2 || true
+        plugin_state >&2 || true
+        cat "$log_file" >&2 || true
+        exit 1
+    fi
+
+    echo "PSD live probe: real gutter navigation + compositor transform PASS"
+
+    hyprctl dispatch workspace "name:$probe_workspace_b" | grep -qx "ok"
+
+    retargeted=0
+    for _ in $(seq 1 40); do
+        state_json="$(plugin_state)"
+
+        if python3 - "$state_json" "$primary_monitor" "$first_generation" "$first_reset_count" <<'PY'
+import json
+import sys
+
+state = json.loads(sys.argv[1])
+monitor = sys.argv[2]
+first_generation = int(sys.argv[3])
+first_reset_count = int(sys.argv[4])
+
+matches = [x for x in state["trackedTransforms"] if x["monitor"] == monitor]
+if len(matches) != 1:
+    raise SystemExit(1)
+
+transform = matches[0]
+if int(transform["workspaceGeneration"]) == first_generation:
+    raise SystemExit(1)
+if int(state["workspaceSwitchResetCount"]) <= first_reset_count:
+    raise SystemExit(1)
+if abs(float(transform["x"])) < 1.0 and abs(float(transform["y"])) < 1.0:
+    raise SystemExit(1)
+PY
+        then
+            retargeted=1
+            break
+        fi
+
+        sleep 0.1
+    done
+
+    if [[ "$retargeted" != "1" ]]; then
+        echo "PSD live probe: displaced workspace switch did not retarget the compositor transform." >&2
+        plugin_state >&2 || true
+        cat "$log_file" >&2 || true
+        exit 1
+    fi
+
+    echo "PSD live probe: workspace retarget + previous-workspace reset PASS"
+
+    kill -TERM "$shell_pid"
+
+    shell_exited=0
+    for _ in $(seq 1 50); do
+        if ! kill -0 "$shell_pid" >/dev/null 2>&1; then
+            shell_exited=1
+            break
+        fi
+        sleep 0.1
+    done
+
+    if [[ "$shell_exited" != "1" ]]; then
+        echo "PSD live probe: psd-shell did not exit after SIGTERM." >&2
+        cat "$log_file" >&2 || true
+        exit 1
+    fi
+
+    wait "$shell_pid"
+    shell_pid=""
+
+    shutdown_clean=0
+    for _ in $(seq 1 30); do
+        state_json="$(plugin_state)"
+        if python3 - "$state_json" <<'PY' >/dev/null 2>&1
+import json
+import sys
+
+state = json.loads(sys.argv[1])
+raise SystemExit(0 if state["trackedTransforms"] == [] else 1)
+PY
+        then
+            shutdown_clean=1
+            break
+        fi
+        sleep 0.1
+    done
+
+    if [[ "$shutdown_clean" != "1" ]]; then
+        echo "PSD live probe: shell shutdown left an experimental compositor transform tracked." >&2
+        plugin_state >&2 || true
+        cat "$log_file" >&2 || true
+        exit 1
+    fi
+
+    echo "PSD live probe: SIGTERM drain + final compositor reset PASS"
+
+    restore_runtime_context
 fi
 
 echo "PSD live probe: PASS"
