@@ -140,7 +140,9 @@ The `ubuntu-26-04-qemu` CI job boots the pinned Ubuntu Minimal 26.04 release ins
 
 The image URL is release-dated rather than `current`, and the harness verifies the cached/downloaded QCOW2 against Canonical's `SHA256SUMS` before booting it.
 
-The VM validates compositor semantics, lifecycle and visible render translation. For the render proof it creates deterministic colored Wayland clients in tiled, floating and pinned states, applies an inward 96-logical-unit workspace render offset, captures the real output with `grim`, correlates the client-color mask with Pillow, and then verifies reset. It also requires Hyprland's logical client geometry to stay unchanged, proving that the experimental path is render-only rather than a window move.
+The VM validates compositor semantics, lifecycle and visible render translation. For the render proof it creates deterministic colored Wayland clients in tiled, floating and pinned states, applies an inward 96-logical-unit PSD render transform, captures the real output with `grim`, correlates the client-color mask with Pillow, and then verifies reset. It also requires Hyprland's logical client geometry to stay unchanged, proving that the experimental path is render-only rather than a window move.
+
+The Hyprland 0.53.3 renderer already applies workspace `m_renderOffset` to non-pinned floating windows. PSD therefore does not add a second floating translation: it neutralizes Hyprland's workspace-animation-only floating correction to keep the movement rigid, and uses a per-window presentation offset only for pinned windows, which Hyprland explicitly excludes from workspace render offset. Native workspace-animation coexistence remains an unresolved experiment boundary.
 
 It does **not** validate physical-device properties such as touchpad feel, NVIDIA-specific behavior, direct-scanout performance, VRR, real mixed-DPI displays or perceptual latency.
 

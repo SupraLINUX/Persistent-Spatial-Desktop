@@ -118,9 +118,17 @@ That phase should use the narrowest compositor-side integration capable of:
 - fullscreen bypass;
 - per-monitor independence.
 
-A PSD-specific Hyprland plugin now exists as an experiment behind the same compositor abstraction. Pixel evidence in the Ubuntu 26.04 QEMU session proved that `CWorkspace::m_renderOffset` moves tiled windows but does not move floating windows. The current experiment therefore composes two Hyprland render-time mechanisms: workspace `m_renderOffset` for tiled content and per-window `m_floatingOffset` for floating/pinned content. PSD tracks only its additive contribution to `m_floatingOffset` and subtracts that contribution on reset, workspace retarget or plugin unload so an unrelated offset is not blindly overwritten.
+A PSD-specific Hyprland plugin now exists as an experiment behind the same compositor abstraction. Inspection of the exact Ubuntu 26.04 target source (Hyprland 0.53.3) established the renderer semantics before further modification:
 
-This remains a proof of concept, not an accepted production mechanism. The screenshot probe is authoritative: if floating or pinned pixels do not move while `j/clients` logical geometry remains stable, this approach is rejected rather than papered over.
+- `CHyprRenderer::renderWindow()` adds `CWorkspace::m_renderOffset` to every **non-pinned** window, including floating windows;
+- Hyprland's workspace-animation update callback separately rewrites `CWindow::m_floatingOffset` for floating-window edge/clipping correction;
+- pinned windows are deliberately excluded from workspace `m_renderOffset`.
+
+An earlier PSD experiment incorrectly added the PSD vector to `m_floatingOffset` for all floating windows. The QEMU diagnostic exposed the collision (`applied=-96`, Hyprland correction present at the same time), so that approach was rejected.
+
+The corrected experiment uses workspace `m_renderOffset` as the sole translation for tiled and non-pinned floating content. Immediately after Hyprland's synchronous workspace-offset callback, PSD neutralizes the workspace-animation-only `m_floatingOffset` correction on non-pinned floating windows to preserve rigid translation. Pinned windows receive the PSD vector through `m_floatingOffset` because the renderer intentionally excludes them from `m_renderOffset`. Reset, workspace retarget and plugin unload return those presentation offsets to zero.
+
+This remains a proof of concept, not an accepted production mechanism. `m_renderOffset` is itself owned by Hyprland's native workspace-animation system, so coexistence with animated workspace changes is a known unresolved coupling and must be validated or replaced with a dedicated compositor-side PSD transform before production adoption. The screenshot probe remains authoritative: tiled, floating and pinned pixels must translate while `j/clients` logical geometry remains unchanged.
 
 The internal transform command contract is now also compositor-generic: `SpatialCompositorSync` talks to `CompositorBridge`, not directly to `HyprlandIpcBridge`. Each transform command receives an internal command ID so completion from an unrelated or stale request cannot accidentally release another monitor-local command queue.
 

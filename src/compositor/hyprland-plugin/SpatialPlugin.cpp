@@ -24,9 +24,11 @@
 
 namespace {
 
-struct FloatingWindowTransform
+struct PresentationWindowTransform
 {
     PHLWINDOWREF window;
+    bool pinned = false;
+    Vector2D observedBefore;
     Vector2D appliedOffset;
 };
 
@@ -35,7 +37,7 @@ struct MonitorTransformState
     PHLWORKSPACEREF workspace;
     Vector2D offset;
     uint64_t workspaceGeneration = 0;
-    std::vector<FloatingWindowTransform> floatingWindows;
+    std::vector<PresentationWindowTransform> presentationWindows;
 };
 
 HANDLE g_handle = nullptr;
@@ -118,7 +120,7 @@ void applyOffset(const PHLWORKSPACE &workspace, const Vector2D &offset)
         g_pHyprRenderer->damageMonitor(monitor);
 }
 
-bool floatingWindowBelongsToTransform(
+bool presentationWindowBelongsToTransform(
     const PHLWINDOW &window,
     const PHLMONITOR &monitor,
     const PHLWORKSPACE &workspace)
@@ -135,66 +137,59 @@ bool floatingWindowBelongsToTransform(
     return window->m_workspace == workspace;
 }
 
-void resetFloatingWindows(MonitorTransformState &state)
+void clearPresentationWindows(MonitorTransformState &state)
 {
-    for (FloatingWindowTransform &tracked : state.floatingWindows) {
+    for (PresentationWindowTransform &tracked : state.presentationWindows) {
         const auto window = tracked.window.lock();
-        if (!window)
-            continue;
-
-        // Preserve any other compositor/plugin contribution that changed
-        // m_floatingOffset while PSD was active. PSD removes only the vector
-        // it most recently contributed.
-        window->m_floatingOffset -= tracked.appliedOffset;
+        if (window)
+            window->m_floatingOffset = Vector2D{};
     }
 
-    state.floatingWindows.clear();
+    state.presentationWindows.clear();
 }
 
-void applyFloatingWindows(
+void applyPresentationWindows(
     MonitorTransformState &state,
     const PHLMONITOR &monitor,
     const PHLWORKSPACE &workspace,
     const Vector2D &offset)
 {
-    std::vector<FloatingWindowTransform> next;
-    next.reserve(state.floatingWindows.size() + 4);
-
-    for (FloatingWindowTransform &tracked : state.floatingWindows) {
+    // CWorkspace::m_renderOffset already translates every non-pinned window
+    // in Hyprland 0.53.x. Its workspace-animation callback additionally writes
+    // CWindow::m_floatingOffset for floating-window clipping near monitor
+    // boundaries. PSD requires rigid translation, so that correction is
+    // neutralized for non-pinned floating windows after setValueAndWarp()
+    // synchronously ran Hyprland's callback.
+    //
+    // Pinned windows are deliberately excluded from m_renderOffset by
+    // Hyprland's renderer. For them, m_floatingOffset is the narrow render-time
+    // compensation needed to keep pinned content attached to CENTER.
+    for (PresentationWindowTransform &tracked : state.presentationWindows) {
         const auto window = tracked.window.lock();
-        if (!window)
-            continue;
-
-        const Vector2D baseOffset =
-            window->m_floatingOffset - tracked.appliedOffset;
-
-        if (!floatingWindowBelongsToTransform(window, monitor, workspace)) {
-            window->m_floatingOffset = baseOffset;
-            continue;
-        }
-
-        window->m_floatingOffset = baseOffset + offset;
-        next.push_back({window, offset});
+        if (window && !presentationWindowBelongsToTransform(window, monitor, workspace))
+            window->m_floatingOffset = Vector2D{};
     }
+
+    std::vector<PresentationWindowTransform> next;
+    next.reserve(state.presentationWindows.size() + 4);
 
     for (const auto &window : g_pCompositor->m_windows) {
-        if (!floatingWindowBelongsToTransform(window, monitor, workspace))
+        if (!presentationWindowBelongsToTransform(window, monitor, workspace))
             continue;
 
-        const bool alreadyTracked = std::ranges::any_of(
-            next,
-            [&window](const FloatingWindowTransform &tracked) {
-                return tracked.window.lock() == window;
-            });
+        const Vector2D observedBefore = window->m_floatingOffset;
+        const Vector2D appliedOffset = window->m_pinned ? offset : Vector2D{};
 
-        if (alreadyTracked)
-            continue;
-
-        window->m_floatingOffset += offset;
-        next.push_back({window, offset});
+        window->m_floatingOffset = appliedOffset;
+        next.push_back({
+            .window = window,
+            .pinned = window->m_pinned,
+            .observedBefore = observedBefore,
+            .appliedOffset = appliedOffset,
+        });
     }
 
-    state.floatingWindows = std::move(next);
+    state.presentationWindows = std::move(next);
 
     if (monitor)
         g_pHyprRenderer->damageMonitor(monitor);
@@ -209,8 +204,8 @@ MonitorTransformState &trackWorkspaceForMonitor(
 
     if (inserted || previousWorkspace != workspace) {
         if (previousWorkspace) {
-            resetFloatingWindows(state);
             applyOffset(previousWorkspace, Vector2D{});
+            clearPresentationWindows(state);
             ++g_workspaceSwitchResetCount;
         }
 
@@ -274,7 +269,7 @@ SDispatchResult setOffset(std::string arguments)
     MonitorTransformState &state = trackWorkspaceForMonitor(monitorName, workspace);
     state.offset = Vector2D{x, y};
     applyOffset(workspace, state.offset);
-    applyFloatingWindows(state, monitor, workspace, state.offset);
+    applyPresentationWindows(state, monitor, workspace, state.offset);
     return {};
 }
 
@@ -294,11 +289,11 @@ SDispatchResult resetOffset(std::string arguments)
     MonitorTransformState &state = tracked->second;
     const auto workspace = state.workspace.lock();
 
-    resetFloatingWindows(state);
-    g_monitorTransforms.erase(tracked);
-
     if (workspace)
         applyOffset(workspace, Vector2D{});
+
+    clearPresentationWindows(state);
+    g_monitorTransforms.erase(tracked);
 
     return {};
 }
@@ -407,17 +402,17 @@ void onSwipeEnd(void *, SCallbackInfo &info, std::any parameter)
 std::string capabilitiesResponse(eHyprCtlOutputFormat format, std::string)
 {
     if (format == FORMAT_JSON) {
-        return R"json({"protocolVersion":3,"pluginVersion":"0.1.2","spatialRenderOffsetExperimental":true,"monitorTargeting":true,"fourFingerGestureEventsExperimental":true,"gestureEventsDefaultEnabled":false,"diagnosticStateQueryExperimental":true,"lifecycleEventsExperimental":true,"floatingRenderOffsetExperimental":true})json";
+        return R"json({"protocolVersion":3,"pluginVersion":"0.1.3","spatialRenderOffsetExperimental":true,"monitorTargeting":true,"fourFingerGestureEventsExperimental":true,"gestureEventsDefaultEnabled":false,"diagnosticStateQueryExperimental":true,"lifecycleEventsExperimental":true,"rigidFloatingNormalizationExperimental":true,"pinnedPresentationOffsetExperimental":true})json";
     }
 
-    return "protocolVersion=3 pluginVersion=0.1.2 spatialRenderOffsetExperimental=true monitorTargeting=true fourFingerGestureEventsExperimental=true gestureEventsDefaultEnabled=false diagnosticStateQueryExperimental=true lifecycleEventsExperimental=true floatingRenderOffsetExperimental=true";
+    return "protocolVersion=3 pluginVersion=0.1.3 spatialRenderOffsetExperimental=true monitorTargeting=true fourFingerGestureEventsExperimental=true gestureEventsDefaultEnabled=false diagnosticStateQueryExperimental=true lifecycleEventsExperimental=true rigidFloatingNormalizationExperimental=true pinnedPresentationOffsetExperimental=true";
 }
 
 std::string stateResponse(eHyprCtlOutputFormat format, std::string)
 {
     if (format != FORMAT_JSON) {
         return std::format(
-            "trackedTransforms={} touchedWorkspaces={} trackedFloatingWindows={} workspaceSwitchResetCount={} gestureEventsEnabled={} gestureActive={}",
+            "trackedTransforms={} touchedWorkspaces={} trackedPresentationWindows={} workspaceSwitchResetCount={} gestureEventsEnabled={} gestureActive={}",
             g_monitorTransforms.size(),
             g_touchedWorkspaces.size(),
             std::accumulate(
@@ -425,7 +420,7 @@ std::string stateResponse(eHyprCtlOutputFormat format, std::string)
                 g_monitorTransforms.end(),
                 size_t{0},
                 [](size_t count, const auto &entry) {
-                    return count + entry.second.floatingWindows.size();
+                    return count + entry.second.presentationWindows.size();
                 }),
             g_workspaceSwitchResetCount,
             g_gestureEventsEnabled ? "true" : "false",
@@ -448,23 +443,26 @@ std::string stateResponse(eHyprCtlOutputFormat format, std::string)
             state.offset.y);
     }
 
-    std::string floatingOffsets;
+    std::string presentationOffsets;
     first = true;
 
     for (const auto &[monitorName, state] : g_monitorTransforms) {
-        for (const FloatingWindowTransform &tracked : state.floatingWindows) {
+        for (const PresentationWindowTransform &tracked : state.presentationWindows) {
             const auto window = tracked.window.lock();
             if (!window)
                 continue;
 
             if (!first)
-                floatingOffsets += ',';
+                presentationOffsets += ',';
             first = false;
 
-            floatingOffsets += std::format(
-                R"json({{"monitor":"{}","pinned":{},"appliedX":{:.6f},"appliedY":{:.6f},"currentX":{:.6f},"currentY":{:.6f}}})json",
+            presentationOffsets += std::format(
+                R"json({{"monitor":"{}","pinned":{},"strategy":"{}","observedBeforeX":{:.6f},"observedBeforeY":{:.6f},"appliedX":{:.6f},"appliedY":{:.6f},"currentX":{:.6f},"currentY":{:.6f}}})json",
                 jsonEscape(monitorName),
-                window->m_pinned ? "true" : "false",
+                tracked.pinned ? "true" : "false",
+                tracked.pinned ? "pinned-compensation" : "workspace-only",
+                tracked.observedBefore.x,
+                tracked.observedBefore.y,
                 tracked.appliedOffset.x,
                 tracked.appliedOffset.y,
                 window->m_floatingOffset.x,
@@ -473,7 +471,7 @@ std::string stateResponse(eHyprCtlOutputFormat format, std::string)
     }
 
     return std::format(
-        R"json({{"trackedTransforms":[{}],"touchedWorkspaceCount":{},"trackedFloatingWindowCount":{},"floatingOffsets":[{}],"workspaceSwitchResetCount":{},"gestureEventsEnabled":{},"gestureActive":{}}})json",
+        R"json({{"trackedTransforms":[{}],"touchedWorkspaceCount":{},"trackedFloatingWindowCount":{},"presentationOffsets":[{}],"workspaceSwitchResetCount":{},"gestureEventsEnabled":{},"gestureActive":{}}})json",
         transforms,
         g_touchedWorkspaces.size(),
         std::accumulate(
@@ -481,9 +479,9 @@ std::string stateResponse(eHyprCtlOutputFormat format, std::string)
             g_monitorTransforms.end(),
             size_t{0},
             [](size_t count, const auto &entry) {
-                return count + entry.second.floatingWindows.size();
+                return count + entry.second.presentationWindows.size();
             }),
-        floatingOffsets,
+        presentationOffsets,
         g_workspaceSwitchResetCount,
         g_gestureEventsEnabled ? "true" : "false",
         g_spatialGestureActive ? "true" : "false");
@@ -491,15 +489,15 @@ std::string stateResponse(eHyprCtlOutputFormat format, std::string)
 
 void resetTouchedWorkspaces()
 {
-    for (auto &[monitorName, state] : g_monitorTransforms) {
-        (void)monitorName;
-        resetFloatingWindows(state);
-    }
-
     for (const PHLWORKSPACEREF &weak : g_touchedWorkspaces) {
         const auto workspace = weak.lock();
         if (workspace)
             applyOffset(workspace, Vector2D{});
+    }
+
+    for (auto &[monitorName, state] : g_monitorTransforms) {
+        (void)monitorName;
+        clearPresentationWindows(state);
     }
 
     g_monitorTransforms.clear();
@@ -569,7 +567,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle)
         "psd-hyprland-plugin",
         "Persistent Spatial Desktop compositor integration experiment",
         "SupraLINUX",
-        "0.1.2",
+        "0.1.3",
     };
 }
 

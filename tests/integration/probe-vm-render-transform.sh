@@ -238,7 +238,7 @@ candidate = points(candidate_path)
 best_dx = None
 best_overlap = -1
 
-for dx in range(-160, 161, step):
+for dx in range(-224, 225, step):
     overlap = sum((x + dx, y) in candidate for x, y in baseline)
     if overlap > best_overlap:
         best_overlap = overlap
@@ -385,26 +385,35 @@ import sys
 state = json.loads(sys.argv[1])
 mode = sys.argv[2]
 expected = float(sys.argv[3])
-entries = state.get("floatingOffsets", [])
+entries = state.get("presentationOffsets", [])
+want_pinned = mode == "pinned"
+entries = [entry for entry in entries if bool(entry.get("pinned")) == want_pinned]
 
 if not entries:
     raise SystemExit(
-        f"PSD render probe: {mode} was not tracked as a floating render target; "
+        f"PSD render probe: {mode} was not tracked as a presentation target; "
         f"state={state}"
     )
 
 entry = entries[0]
 print(
     "PSD render probe: "
-    f"{mode} floating diagnostic "
+    f"{mode} presentation diagnostic "
+    f"strategy={entry.get('strategy')} "
+    f"observedBefore=({entry.get('observedBeforeX')},{entry.get('observedBeforeY')}) "
     f"applied=({entry.get('appliedX')},{entry.get('appliedY')}) "
     f"current=({entry.get('currentX')},{entry.get('currentY')}) "
     f"pinned={entry.get('pinned')}"
 )
 
-if abs(float(entry.get("appliedX", 0.0)) - expected) > 0.01:
+expected_presentation = expected if want_pinned else 0.0
+if abs(float(entry.get("appliedX", 0.0)) - expected_presentation) > 0.01:
     raise SystemExit(
-        f"PSD render probe: {mode} tracked wrong applied offset: {entry}"
+        f"PSD render probe: {mode} tracked wrong presentation offset: {entry}"
+    )
+if abs(float(entry.get("currentX", 0.0)) - expected_presentation) > 0.01:
+    raise SystemExit(
+        f"PSD render probe: {mode} compositor presentation offset diverged: {entry}"
     )
 PY
     fi
