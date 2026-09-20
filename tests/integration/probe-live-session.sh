@@ -431,17 +431,22 @@ PY
     hyprctl dispatch workspace "name:$probe_workspace_b" | grep -qx "ok"
 
     retargeted=0
+    retarget_mode=""
     for _ in $(seq 1 40); do
         state_json="$(plugin_state)"
+        workspaces_json="$(hyprctl -j workspaces)"
 
-        if python3 - "$state_json" "$primary_monitor" "$first_generation" "$first_reset_count" <<'PY'
+        if retarget_mode="$(
+            python3 - "$state_json" "$workspaces_json" "$primary_monitor" "$first_generation" "$first_reset_count" "$probe_workspace_a" <<'PY'
 import json
 import sys
 
 state = json.loads(sys.argv[1])
-monitor = sys.argv[2]
-first_generation = int(sys.argv[3])
-first_reset_count = int(sys.argv[4])
+workspaces = json.loads(sys.argv[2])
+monitor = sys.argv[3]
+first_generation = int(sys.argv[4])
+first_reset_count = int(sys.argv[5])
+previous_workspace_name = sys.argv[6]
 
 matches = [x for x in state["trackedTransforms"] if x["monitor"] == monitor]
 if len(matches) != 1:
@@ -450,12 +455,25 @@ if len(matches) != 1:
 transform = matches[0]
 if int(transform["workspaceGeneration"]) == first_generation:
     raise SystemExit(1)
-if int(state["workspaceSwitchResetCount"]) <= first_reset_count:
-    raise SystemExit(1)
 if abs(float(transform["x"])) < 1.0 and abs(float(transform["y"])) < 1.0:
     raise SystemExit(1)
+
+previous_still_exists = any(
+    str(workspace.get("name", "")) == previous_workspace_name
+    for workspace in workspaces
+)
+
+if previous_still_exists:
+    if int(state["workspaceSwitchResetCount"]) <= first_reset_count:
+        raise SystemExit(1)
+    print("reset")
+else:
+    # Empty temporary workspaces are destroyed by Hyprland when switching
+    # away from them. In that case their render-offset object disappears with
+    # the workspace, so there is nothing left for the plugin to reset.
+    print("destroyed")
 PY
-        then
+        )"; then
             retargeted=1
             break
         fi
@@ -466,11 +484,16 @@ PY
     if [[ "$retargeted" != "1" ]]; then
         echo "PSD live probe: displaced workspace switch did not retarget the compositor transform." >&2
         plugin_state >&2 || true
+        hyprctl -j workspaces >&2 || true
         cat "$log_file" >&2 || true
         exit 1
     fi
 
-    echo "PSD live probe: workspace retarget + previous-workspace reset PASS"
+    if [[ "$retarget_mode" == "reset" ]]; then
+        echo "PSD live probe: workspace retarget + previous-workspace reset PASS"
+    else
+        echo "PSD live probe: workspace retarget + previous empty workspace destroyed PASS"
+    fi
 
     kill -TERM "$shell_pid"
 
