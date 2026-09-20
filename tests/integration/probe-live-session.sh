@@ -99,6 +99,18 @@ cleanup() {
 
     if [[ -n "$shell_pid" ]]; then
         kill -TERM "$shell_pid" >/dev/null 2>&1 || true
+
+        for _ in $(seq 1 30); do
+            if ! kill -0 "$shell_pid" >/dev/null 2>&1; then
+                break
+            fi
+            sleep 0.1
+        done
+
+        if kill -0 "$shell_pid" >/dev/null 2>&1; then
+            kill -KILL "$shell_pid" >/dev/null 2>&1 || true
+        fi
+
         wait "$shell_pid" >/dev/null 2>&1 || true
     fi
 
@@ -304,8 +316,15 @@ monitor_name = sys.argv[2]
 monitor = next(m for m in monitors if m["name"] == monitor_name)
 
 scale = float(monitor.get("scale", 1.0) or 1.0)
-width = float(monitor["width"]) / scale
-height = float(monitor["height"]) / scale
+width = float(monitor["width"])
+height = float(monitor["height"])
+transform = int(monitor.get("transform", 0) or 0)
+
+if transform in (1, 3, 5, 7):
+    width, height = height, width
+
+width /= scale
+height /= scale
 x = float(monitor.get("x", 0))
 y = float(monitor.get("y", 0))
 
@@ -379,6 +398,11 @@ PY
         cat "$log_file" >&2 || true
         exit 1
     fi
+
+    # The canonical spatial animation is 500 ms. Let the real transition
+    # settle before changing workspaces so this checks retargeting of a stable
+    # displaced state rather than an animation frame racing the workspace event.
+    sleep 0.6
 
     echo "PSD live probe: real gutter navigation + compositor transform PASS"
 
