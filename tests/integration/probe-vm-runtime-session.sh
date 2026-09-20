@@ -100,6 +100,13 @@ done
 if [[ -z "$instance_dir" || ! -S "$instance_dir/.socket.sock" ]]; then
     echo "PSD VM runtime probe: Hyprland IPC did not become ready." >&2
     cat "$log_file" >&2 || true
+
+    latest_crash="$(find "${HOME}/.cache/hyprland" -maxdepth 1 -type f -name 'hyprlandCrashReport*.txt' -printf '%T@ %p\n' 2>/dev/null | sort -nr | head -n1 | cut -d' ' -f2- || true)"
+    if [[ -n "$latest_crash" && -f "$latest_crash" ]]; then
+        echo "===== PSD VM runtime probe: latest Hyprland crash report =====" >&2
+        cat "$latest_crash" >&2 || true
+    fi
+
     exit 1
 fi
 
