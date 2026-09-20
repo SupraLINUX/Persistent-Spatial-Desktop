@@ -46,6 +46,10 @@ if [[ "${PSD_PROBE_USE_WAYLAND_BACKEND:-0}" == "1" ]]; then
         exit 1
     fi
     unset HYPRLAND_HEADLESS_ONLY
+elif [[ "${PSD_PROBE_USE_NATIVE_BACKEND:-0}" == "1" ]]; then
+    unset HYPRLAND_HEADLESS_ONLY
+    unset WAYLAND_DISPLAY
+    unset DISPLAY
 else
     export HYPRLAND_HEADLESS_ONLY=1
 fi
