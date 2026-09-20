@@ -85,6 +85,14 @@ bool CompositorBridge::monitorHasFullscreenWindow(const QString &monitorName) co
     return false;
 }
 
+quint64 CompositorBridge::allocateSpatialTransformCommandId()
+{
+    const quint64 commandId = m_nextSpatialTransformCommandId++;
+    if (m_nextSpatialTransformCommandId == 0)
+        m_nextSpatialTransformCommandId = 1;
+    return commandId;
+}
+
 void CompositorBridge::setAvailable(bool available)
 {
     if (m_available == available)
