@@ -4,6 +4,7 @@
 #include <hyprland/src/SharedDefs.hpp>
 #include <hyprland/src/desktop/Workspace.hpp>
 #include <hyprland/src/desktop/state/FocusState.hpp>
+#include <hyprland/src/desktop/view/Window.hpp>
 #include <hyprland/src/devices/IPointer.hpp>
 #include <hyprland/src/managers/EventManager.hpp>
 #include <hyprland/src/plugins/PluginAPI.hpp>
@@ -14,6 +15,7 @@
 #include <cstdint>
 #include <cmath>
 #include <format>
+#include <numeric>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -22,11 +24,18 @@
 
 namespace {
 
+struct FloatingWindowTransform
+{
+    PHLWINDOWREF window;
+    Vector2D appliedOffset;
+};
+
 struct MonitorTransformState
 {
     PHLWORKSPACEREF workspace;
     Vector2D offset;
     uint64_t workspaceGeneration = 0;
+    std::vector<FloatingWindowTransform> floatingWindows;
 };
 
 HANDLE g_handle = nullptr;
@@ -109,6 +118,88 @@ void applyOffset(const PHLWORKSPACE &workspace, const Vector2D &offset)
         g_pHyprRenderer->damageMonitor(monitor);
 }
 
+bool floatingWindowBelongsToTransform(
+    const PHLWINDOW &window,
+    const PHLMONITOR &monitor,
+    const PHLWORKSPACE &workspace)
+{
+    if (!window || !window->m_isMapped || window->isHidden() || !window->m_isFloating)
+        return false;
+
+    if (window->m_monitor.lock() != monitor)
+        return false;
+
+    if (window->m_pinned)
+        return true;
+
+    return window->m_workspace == workspace;
+}
+
+void resetFloatingWindows(MonitorTransformState &state)
+{
+    for (FloatingWindowTransform &tracked : state.floatingWindows) {
+        const auto window = tracked.window.lock();
+        if (!window)
+            continue;
+
+        // Preserve any other compositor/plugin contribution that changed
+        // m_floatingOffset while PSD was active. PSD removes only the vector
+        // it most recently contributed.
+        window->m_floatingOffset -= tracked.appliedOffset;
+    }
+
+    state.floatingWindows.clear();
+}
+
+void applyFloatingWindows(
+    MonitorTransformState &state,
+    const PHLMONITOR &monitor,
+    const PHLWORKSPACE &workspace,
+    const Vector2D &offset)
+{
+    std::vector<FloatingWindowTransform> next;
+    next.reserve(state.floatingWindows.size() + 4);
+
+    for (FloatingWindowTransform &tracked : state.floatingWindows) {
+        const auto window = tracked.window.lock();
+        if (!window)
+            continue;
+
+        const Vector2D baseOffset =
+            window->m_floatingOffset - tracked.appliedOffset;
+
+        if (!floatingWindowBelongsToTransform(window, monitor, workspace)) {
+            window->m_floatingOffset = baseOffset;
+            continue;
+        }
+
+        window->m_floatingOffset = baseOffset + offset;
+        next.push_back({window, offset});
+    }
+
+    for (const auto &window : g_pCompositor->m_windows) {
+        if (!floatingWindowBelongsToTransform(window, monitor, workspace))
+            continue;
+
+        const bool alreadyTracked = std::ranges::any_of(
+            next,
+            [&window](const FloatingWindowTransform &tracked) {
+                return tracked.window.lock() == window;
+            });
+
+        if (alreadyTracked)
+            continue;
+
+        window->m_floatingOffset += offset;
+        next.push_back({window, offset});
+    }
+
+    state.floatingWindows = std::move(next);
+
+    if (monitor)
+        g_pHyprRenderer->damageMonitor(monitor);
+}
+
 MonitorTransformState &trackWorkspaceForMonitor(
     const std::string &monitorName, const PHLWORKSPACE &workspace)
 {
@@ -118,6 +209,7 @@ MonitorTransformState &trackWorkspaceForMonitor(
 
     if (inserted || previousWorkspace != workspace) {
         if (previousWorkspace) {
+            resetFloatingWindows(state);
             applyOffset(previousWorkspace, Vector2D{});
             ++g_workspaceSwitchResetCount;
         }
@@ -182,6 +274,7 @@ SDispatchResult setOffset(std::string arguments)
     MonitorTransformState &state = trackWorkspaceForMonitor(monitorName, workspace);
     state.offset = Vector2D{x, y};
     applyOffset(workspace, state.offset);
+    applyFloatingWindows(state, monitor, workspace, state.offset);
     return {};
 }
 
@@ -198,7 +291,10 @@ SDispatchResult resetOffset(std::string arguments)
     if (tracked == g_monitorTransforms.end())
         return {};
 
-    const auto workspace = tracked->second.workspace.lock();
+    MonitorTransformState &state = tracked->second;
+    const auto workspace = state.workspace.lock();
+
+    resetFloatingWindows(state);
     g_monitorTransforms.erase(tracked);
 
     if (workspace)
@@ -311,19 +407,26 @@ void onSwipeEnd(void *, SCallbackInfo &info, std::any parameter)
 std::string capabilitiesResponse(eHyprCtlOutputFormat format, std::string)
 {
     if (format == FORMAT_JSON) {
-        return R"json({"protocolVersion":3,"pluginVersion":"0.1.1","spatialRenderOffsetExperimental":true,"monitorTargeting":true,"fourFingerGestureEventsExperimental":true,"gestureEventsDefaultEnabled":false,"diagnosticStateQueryExperimental":true,"lifecycleEventsExperimental":true})json";
+        return R"json({"protocolVersion":3,"pluginVersion":"0.1.2","spatialRenderOffsetExperimental":true,"monitorTargeting":true,"fourFingerGestureEventsExperimental":true,"gestureEventsDefaultEnabled":false,"diagnosticStateQueryExperimental":true,"lifecycleEventsExperimental":true,"floatingRenderOffsetExperimental":true})json";
     }
 
-    return "protocolVersion=3 pluginVersion=0.1.1 spatialRenderOffsetExperimental=true monitorTargeting=true fourFingerGestureEventsExperimental=true gestureEventsDefaultEnabled=false diagnosticStateQueryExperimental=true lifecycleEventsExperimental=true";
+    return "protocolVersion=3 pluginVersion=0.1.2 spatialRenderOffsetExperimental=true monitorTargeting=true fourFingerGestureEventsExperimental=true gestureEventsDefaultEnabled=false diagnosticStateQueryExperimental=true lifecycleEventsExperimental=true floatingRenderOffsetExperimental=true";
 }
 
 std::string stateResponse(eHyprCtlOutputFormat format, std::string)
 {
     if (format != FORMAT_JSON) {
         return std::format(
-            "trackedTransforms={} touchedWorkspaces={} workspaceSwitchResetCount={} gestureEventsEnabled={} gestureActive={}",
+            "trackedTransforms={} touchedWorkspaces={} trackedFloatingWindows={} workspaceSwitchResetCount={} gestureEventsEnabled={} gestureActive={}",
             g_monitorTransforms.size(),
             g_touchedWorkspaces.size(),
+            std::accumulate(
+                g_monitorTransforms.begin(),
+                g_monitorTransforms.end(),
+                size_t{0},
+                [](size_t count, const auto &entry) {
+                    return count + entry.second.floatingWindows.size();
+                }),
             g_workspaceSwitchResetCount,
             g_gestureEventsEnabled ? "true" : "false",
             g_spatialGestureActive ? "true" : "false");
@@ -346,9 +449,16 @@ std::string stateResponse(eHyprCtlOutputFormat format, std::string)
     }
 
     return std::format(
-        R"json({{"trackedTransforms":[{}],"touchedWorkspaceCount":{},"workspaceSwitchResetCount":{},"gestureEventsEnabled":{},"gestureActive":{}}})json",
+        R"json({{"trackedTransforms":[{}],"touchedWorkspaceCount":{},"trackedFloatingWindowCount":{},"workspaceSwitchResetCount":{},"gestureEventsEnabled":{},"gestureActive":{}}})json",
         transforms,
         g_touchedWorkspaces.size(),
+        std::accumulate(
+            g_monitorTransforms.begin(),
+            g_monitorTransforms.end(),
+            size_t{0},
+            [](size_t count, const auto &entry) {
+                return count + entry.second.floatingWindows.size();
+            }),
         g_workspaceSwitchResetCount,
         g_gestureEventsEnabled ? "true" : "false",
         g_spatialGestureActive ? "true" : "false");
@@ -356,6 +466,11 @@ std::string stateResponse(eHyprCtlOutputFormat format, std::string)
 
 void resetTouchedWorkspaces()
 {
+    for (auto &[monitorName, state] : g_monitorTransforms) {
+        (void)monitorName;
+        resetFloatingWindows(state);
+    }
+
     for (const PHLWORKSPACEREF &weak : g_touchedWorkspaces) {
         const auto workspace = weak.lock();
         if (workspace)
@@ -429,7 +544,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle)
         "psd-hyprland-plugin",
         "Persistent Spatial Desktop compositor integration experiment",
         "SupraLINUX",
-        "0.1.1",
+        "0.1.2",
     };
 }
 

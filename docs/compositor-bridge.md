@@ -118,7 +118,9 @@ That phase should use the narrowest compositor-side integration capable of:
 - fullscreen bypass;
 - per-monitor independence.
 
-A PSD-specific Hyprland plugin now exists as an experiment behind the same compositor abstraction. It can apply `CWorkspace::m_renderOffset` to the active regular workspace of a named monitor. This remains a proof of concept, not an accepted production mechanism.
+A PSD-specific Hyprland plugin now exists as an experiment behind the same compositor abstraction. Pixel evidence in the Ubuntu 26.04 QEMU session proved that `CWorkspace::m_renderOffset` moves tiled windows but does not move floating windows. The current experiment therefore composes two Hyprland render-time mechanisms: workspace `m_renderOffset` for tiled content and per-window `m_floatingOffset` for floating/pinned content. PSD tracks only its additive contribution to `m_floatingOffset` and subtracts that contribution on reset, workspace retarget or plugin unload so an unrelated offset is not blindly overwritten.
+
+This remains a proof of concept, not an accepted production mechanism. The screenshot probe is authoritative: if floating or pinned pixels do not move while `j/clients` logical geometry remains stable, this approach is rejected rather than papered over.
 
 The internal transform command contract is now also compositor-generic: `SpatialCompositorSync` talks to `CompositorBridge`, not directly to `HyprlandIpcBridge`. Each transform command receives an internal command ID so completion from an unrelated or stale request cannot accidentally release another monitor-local command queue.
 
