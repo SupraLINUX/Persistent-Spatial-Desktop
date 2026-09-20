@@ -3,6 +3,7 @@ set -euo pipefail
 
 SHELL_PATH="${1:-build/psd-shell}"
 PLUGIN_PATH="${2:-build-hypr/src/compositor/hyprland-plugin/psd-hyprland-plugin.so}"
+test_client_path="${PSD_PROBE_TEST_CLIENT:-}"
 
 if [[ -z "${HYPRLAND_INSTANCE_SIGNATURE:-}" ]]; then
     echo "PSD live probe: this must run inside the Hyprland session being tested." >&2
@@ -62,7 +63,6 @@ loaded_by_probe=0
 shell_pid=""
 log_file="${TMPDIR:-/tmp}/psd-live-session-probe.log"
 client_log_file="${TMPDIR:-/tmp}/psd-integration-client.log"
-test_client_path="${PSD_PROBE_TEST_CLIENT:-}"
 client_pids=()
 hotplug_monitor=""
 runtime_restore_needed=0
@@ -487,7 +487,7 @@ PY
 
     persistent_client_title=""
     if [[ -n "$test_client_path" ]]; then
-        persistent_client_title="psd-probe-persistent-$"
+        persistent_client_title="psd-probe-persistent"
         "$test_client_path" --title "$persistent_client_title" >"$client_log_file" 2>&1 &
         persistent_client_pid=$!
         client_pids+=("$persistent_client_pid")
@@ -663,7 +663,7 @@ PY
     fi
 
     if [[ -n "$test_client_path" ]]; then
-        fullscreen_title="psd-probe-fullscreen-$"
+        fullscreen_title="psd-probe-fullscreen"
         "$test_client_path" --title "$fullscreen_title" --fullscreen >>"$client_log_file" 2>&1 &
         fullscreen_pid=$!
         client_pids+=("$fullscreen_pid")
