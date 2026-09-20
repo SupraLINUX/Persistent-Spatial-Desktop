@@ -89,6 +89,7 @@ It then connects to Hyprland's documented command and event UNIX sockets.
 - final-reset draining when experimental sync is disabled, a monitor disappears, or the shell exits normally;
 - SIGTERM/SIGINT conversion into orderly Qt shutdown so compositor cleanup can run;
 - plugin-side tracking of the exact workspace PSD transformed, avoiding reset of the wrong active workspace;
+- experimental `j/psd-plugin-state` diagnostics for integration probes without exposing Hyprland internals as a PSD API;
 - event-coalesced state refreshes;
 - no compositor polling loop;
 - unit tests for tokens, spatial state, responsive geometry, motion authority, Hyprland protocol parsing and compositor reset sequencing.
@@ -148,7 +149,8 @@ The probe:
 
 - refuses to create a duplicate PSD shell if one is already mapped;
 - loads the PSD plugin only when needed and unloads only what it loaded;
-- validates protocol v3 capabilities;
+- validates protocol v3 capabilities plus the experimental diagnostic-state capability;
+- requires the plugin transform state to be clean before starting;
 - launches `psd-shell` with experimental compositor sync enabled;
 - verifies exactly one `psd-shell:<output>` layer surface for every active Hyprland monitor;
 - verifies the shell starts in CENTER with every `psd-return-shield:<output>` surface unmapped;
@@ -156,11 +158,31 @@ The probe:
 - cleans up the shell and experimental gesture interception on exit;
 - resets the experimental render offset on every active monitor before finishing, even when the plugin was already loaded by the session.
 
-It does not move application windows by default. To include a small 24-logical-unit offset/reset smoke test on the focused monitor:
+It does not move application windows by default. To include a small direct 24-logical-unit plugin offset/state/reset smoke test on the focused monitor:
 
 ```bash
 PSD_PROBE_EXERCISE_OFFSET=1 bash tests/integration/probe-live-session.sh
 ```
+
+For the stronger runtime lifecycle test, run:
+
+```bash
+PSD_PROBE_EXERCISE_RUNTIME=1 bash tests/integration/probe-live-session.sh
+```
+
+That opt-in mode uses the real shell input path rather than a test-only shell API. On the focused monitor it:
+
+1. records the current workspace and cursor position;
+2. switches to a temporary empty named workspace;
+3. moves the Hyprland cursor into the LEFT gutter and waits for the real ~180 ms dwell navigation;
+4. requires the return shield and a non-zero compositor transform to appear;
+5. switches to a second temporary workspace while PSD remains displaced;
+6. requires a new workspace generation plus an incremented previous-workspace reset counter;
+7. sends SIGTERM to `psd-shell`;
+8. requires the shell to exit and `j/psd-plugin-state` to report no tracked transforms;
+9. restores the original workspace and cursor position.
+
+The test deliberately uses empty temporary workspaces, so it does not move existing application windows. It does move the pointer and temporarily changes the focused monitor's workspace. The shell is expected to be stopped at the end of this stronger test.
 
 GitHub-hosted CI also runs `tests/integration/test-probe-live-session-mock.sh`. That test uses a fake `hyprctl` and fake shell process only to validate the probe's control flow, cleanup ownership, CENTER-layer expectations and error handling. It is not compositor validation and does not replace the real-session probe.
 
