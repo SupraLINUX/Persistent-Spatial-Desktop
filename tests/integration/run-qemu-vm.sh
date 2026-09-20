@@ -216,7 +216,7 @@ echo "PSD QEMU probe: installing Ubuntu 26.04 guest dependencies"
 ssh_guest '
     set -e
     sudo apt-get update
-    sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends         ca-certificates         build-essential         cmake         git         ninja-build         pkgconf         python3         qt6-base-dev         qt6-declarative-dev         qt6-wayland         liblayershellqtinterface-dev         hyprland         hyprland-dev         libgles-dev         weston \
+    sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends         ca-certificates         build-essential         cmake         git         ninja-build         pkgconf         python3         qt6-base-dev         qt6-declarative-dev         qt6-wayland         liblayershellqtinterface-dev         hyprland         hyprland-dev         libgles-dev         seatd \
         xdg-desktop-portal-hyprland
 '
 
@@ -248,62 +248,62 @@ ssh_guest '
     cmake --build build-hypr --target psd-hyprland-plugin --parallel 2
 '
 
-echo "PSD QEMU probe: running Hyprland nested on Weston headless inside VM"
+echo "PSD QEMU probe: starting seatd for native guest DRM/KMS"
 ssh_guest '
     set -euo pipefail
-    cd /home/psd/src
+    sudo rm -f /run/seatd.sock
+    sudo sh -c "SEATD_VTBOUND=0 exec seatd -g video -l debug >/tmp/psd-seatd.log 2>&1" &
+    seatd_launcher_pid=$!
 
-    nested_runtime="$(mktemp -d)"
-    weston_log="/tmp/psd-weston-headless.log"
-    weston_pid=""
-
-    cleanup_nested() {
-        set +e
-        if [[ -n "$weston_pid" ]]; then
-            kill "$weston_pid" >/dev/null 2>&1 || true
-            wait "$weston_pid" >/dev/null 2>&1 || true
-        fi
-        rm -rf "$nested_runtime"
-    }
-    trap cleanup_nested EXIT
-
-    export XDG_RUNTIME_DIR="$nested_runtime"
-    chmod 700 "$XDG_RUNTIME_DIR"
-    export WAYLAND_DISPLAY=wayland-psd
-    export LIBGL_ALWAYS_SOFTWARE=1
-    export GALLIUM_DRIVER=llvmpipe
-    export AQ_TRACE=1
-
-    weston --backend=headless --renderer=pixman --socket="$WAYLAND_DISPLAY" --idle-time=0 --width=1920 --height=1080 --no-config >"$weston_log" 2>&1 &
-    weston_pid=$!
-
-    weston_ready=0
+    seatd_ready=0
     for _ in $(seq 1 100); do
-        if [[ -S "$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY" ]]; then
-            weston_ready=1
+        if [[ -S /run/seatd.sock ]]; then
+            seatd_ready=1
             break
         fi
 
-        if ! kill -0 "$weston_pid" >/dev/null 2>&1; then
-            echo "PSD QEMU probe: Weston exited before Wayland socket became ready" >&2
-            cat "$weston_log" >&2 || true
+        if ! kill -0 "$seatd_launcher_pid" >/dev/null 2>&1; then
+            echo "PSD QEMU probe: seatd exited before its socket became ready" >&2
+            cat /tmp/psd-seatd.log >&2 || true
             exit 1
         fi
 
         sleep 0.1
     done
 
-    if [[ "$weston_ready" != "1" ]]; then
-        echo "PSD QEMU probe: Weston Wayland socket did not become ready" >&2
-        cat "$weston_log" >&2 || true
+    if [[ "$seatd_ready" != "1" ]]; then
+        echo "PSD QEMU probe: seatd socket did not become ready" >&2
+        cat /tmp/psd-seatd.log >&2 || true
         exit 1
     fi
 
-    echo "PSD QEMU probe: nested Weston ready on $WAYLAND_DISPLAY"
+    echo "PSD QEMU probe: seatd ready"
+    id
+    ls -l /run/seatd.sock /dev/dri /dev/input/event* 2>/dev/null || true
+'
 
-    PSD_PROBE_USE_WAYLAND_BACKEND=1 bash tests/integration/probe-hyprland-plugin.sh build-hypr/src/compositor/hyprland-plugin/psd-hyprland-plugin.so tests/integration/hyprland-headless.conf
+echo "PSD QEMU probe: running Hyprland on native virtio DRM/KMS inside VM"
+ssh_guest '
+    set -euo pipefail
+    cd /home/psd/src
 
-    PSD_PROBE_USE_WAYLAND_BACKEND=1 bash tests/integration/probe-vm-runtime-session.sh build/psd-shell build-hypr/src/compositor/hyprland-plugin/psd-hyprland-plugin.so tests/integration/hyprland-headless.conf
+    export LIBSEAT_BACKEND=seatd
+    export SEATD_VTBOUND=0
+    export AQ_TRACE=1
+    unset WAYLAND_DISPLAY
+    unset DISPLAY
+    unset HYPRLAND_HEADLESS_ONLY
+
+    PSD_PROBE_USE_NATIVE_BACKEND=1 \
+        bash tests/integration/probe-hyprland-plugin.sh \
+            build-hypr/src/compositor/hyprland-plugin/psd-hyprland-plugin.so \
+            tests/integration/hyprland-headless.conf
+
+    PSD_PROBE_USE_NATIVE_BACKEND=1 \
+        bash tests/integration/probe-vm-runtime-session.sh \
+            build/psd-shell \
+            build-hypr/src/compositor/hyprland-plugin/psd-hyprland-plugin.so \
+            tests/integration/hyprland-headless.conf
 '
 
 echo "PSD QEMU probe: PASS"
