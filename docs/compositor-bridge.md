@@ -117,7 +117,7 @@ Disabling the sync does not send a reset in parallel with an existing offset. In
 
 Normal shell shutdown uses the same lifecycle with a bounded drain period. SIGTERM/SIGINT are converted into an orderly Qt shutdown so the reset path can run before process exit.
 
-The Hyprland plugin also tracks the exact workspace transformed by PSD for each monitor. `plugin:psd:reset <monitor>` resets that tracked workspace rather than whichever workspace happens to be active when the reset arrives. If the active workspace changes while PSD owns an offset, the previous tracked workspace is reset before the new workspace can become the transform target. Plugin unload still resets every workspace touched by the experiment.
+The Hyprland plugin also tracks the exact workspace transformed by PSD for each monitor. `plugin:psd:reset <monitor>` resets that tracked workspace rather than whichever workspace happens to be active when the reset arrives. When the compositor reports a changed active workspace while PSD is displaced, the runtime replays the current non-zero transform; the plugin first resets the previously tracked workspace and then adopts the new active workspace. Plugin unload still resets every workspace touched by the experiment.
 
 These safeguards reduce residual-offset risk during normal shutdown, workspace changes and monitor teardown. They do not make the experiment crash-proof against SIGKILL, compositor crashes or machine loss; those remain part of real-session fault testing.
 
