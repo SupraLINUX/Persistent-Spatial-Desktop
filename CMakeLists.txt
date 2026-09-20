@@ -75,6 +75,7 @@ if(PSD_BUILD_SHELL)
         PREFIX "/"
         FILES
             qml/Main.qml
+            qml/GutterInput.qml
             qml/ReturnShield.qml
             qml/SpatialRoot.qml
             qml/Surfaces/SurfaceBase.qml

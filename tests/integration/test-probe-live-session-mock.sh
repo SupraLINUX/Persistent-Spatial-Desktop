@@ -31,7 +31,7 @@ printf '%s\n' "$*" >>"$log"
 case "$*" in
     "-j layers")
         if [[ -e "$shell_ready" ]]; then
-            printf '%s\n' '{"DP-1":{"levels":{"0":[{"namespace":"psd-shell:DP-1"}]}}}'
+            printf '%s\n' '{"DP-1":{"levels":{"0":[{"namespace":"psd-shell:DP-1"}],"2":[{"namespace":"psd-gutter:DP-1:left"},{"namespace":"psd-gutter:DP-1:right"},{"namespace":"psd-gutter:DP-1:top"},{"namespace":"psd-gutter:DP-1:dash"}]}}}'
         else
             printf '%s\n' '{"DP-1":{"levels":{"0":[]}}}'
         fi

@@ -74,12 +74,12 @@ It then connects to Hyprland's documented command and event UNIX sockets.
 - live screen add/remove handling;
 - QML shell root;
 - persistent CENTER/LEFT/RIGHT/TOP/DASH object structure;
-- mouse gutter dwell navigation;
+- mouse gutter dwell navigation through four thin monitor-local LayerTop input surfaces, separated from the LayerBackground shell so normal application windows cannot steal gutter hover;
 - continuous 1:1 gesture progress in the C++ motion controller, including axis lock and distance/velocity snap decisions;
 - rigid translation between shell surfaces driven by a single C++ motion controller;
 - CENTER return semantics;
 - per-monitor transparent return shield preventing displaced apps from receiving the first click;
-- per-monitor explicit-fullscreen suppression: immediate CENTER reset plus shell/shield unmap until fullscreen exits; the monitor-local QML shell window is recreated on exit while C++ spatial state/controllers remain alive, avoiding stale Wayland/layer-shell pointer state across remap;
+- per-monitor explicit-fullscreen suppression: immediate CENTER reset plus complete shell/gutter/shield unmap until fullscreen exits; the monitor-local QML shell and four gutter input surfaces are recreated on exit while C++ spatial state/controllers remain alive;
 - generic internal compositor bridge abstraction;
 - Hyprland IPC state backend;
 - monitor/workspace/window normalization;
@@ -188,7 +188,7 @@ That opt-in mode uses the real shell input path rather than a test-only shell AP
 7. requires a new workspace generation; when the previous workspace remains alive, it also requires an explicit previous-workspace reset;
 8. with `PSD_PROBE_EXERCISE_CRASH_RECOVERY=1`, kills `psd-shell` while that real displaced transform is still active, records whether the compositor retained a residual transform, restarts the shell, and requires every monitor to recover in clean CENTER with zero tracked transforms;
 9. when the integration client is available, requests Hyprland fullscreen and requires PSD surfaces to unmap plus the compositor transform to reset;
-10. requires fullscreen exit to recreate/remap a clean CENTER shell and verifies the compositor has removed the former fullscreen client before exercising gutter input again;
+10. requires fullscreen exit to recreate/remap a clean CENTER shell plus its four gutter input surfaces, verifies the compositor has removed the former fullscreen client, and then requires real gutter navigation to work again;
 11. with `PSD_PROBE_EXERCISE_PLUGIN_LIFECYCLE=1`, displaces CENTER, unloads the compositor plugin, requires every shell instance to snap to clean CENTER, reloads the plugin and requires the real transform path to become usable again;
 12. sends SIGTERM to the recovered shell and requires zero tracked transforms afterward;
 13. restores the original workspace and cursor position.

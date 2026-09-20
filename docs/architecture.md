@@ -76,7 +76,9 @@ The runtime creates one independent layer-shell window per `QScreen`. Each monit
 
 The spatial bridge must expose a coherent workspace/surface transform. Avoid implementing the effect by moving every application window independently if the compositor can expose a lower-level transformation.
 
-Input is intentionally separated from render translation. During a spatial transition, a monitor-local transparent LayerTop shield consumes pointer presses so displaced applications cannot receive accidental input. After the transition settles, the shield covers only the still-visible CENTER area; the revealed PSD surface remains interactive. In CENTER the shield is unmapped.
+Input is intentionally separated from render translation. CENTER edge navigation is owned by four thin monitor-local LayerTop gutter surfaces rather than MouseAreas on the LayerBackground shell; this keeps gutters addressable even when normal application windows cover CENTER. The corner regions are excluded so adjacent destinations do not overlap. The gutter surfaces are present only while settled in CENTER and are fully removed during explicit fullscreen.
+
+During a spatial transition, a monitor-local transparent LayerTop shield consumes pointer presses so displaced applications cannot receive accidental input. After the transition settles, the shield covers only the still-visible CENTER area; the revealed PSD surface remains interactive. In CENTER the shield is unmapped.
 
 Explicit application fullscreen is monitor-scoped bypass state. When the active workspace on an output contains fullscreen content, PSD immediately resets that monitor to CENTER, unmaps both its return shield and its shell layer surface, and leaves the physical output to the application/compositor. When fullscreen ends, the monitor-local PSD shell remaps in CENTER. This preserves the product distinction between maximize and fullscreen and removes PSD layer surfaces from that output while fullscreen is active.
 

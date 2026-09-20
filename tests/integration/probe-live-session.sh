@@ -53,7 +53,7 @@ if [[ -n "$test_client_path" ]]; then
     fi
 fi
 
-existing_psd_layer="$(hyprctl -j layers | python3 -c 'import json,sys; d=json.load(sys.stdin); print(any(str(x.get("namespace","")).startswith(("psd-shell:","psd-return-shield:")) for m in d.values() for level in m.get("levels",{}).values() for x in level))')"
+existing_psd_layer="$(hyprctl -j layers | python3 -c 'import json,sys; d=json.load(sys.stdin); print(any(str(x.get("namespace","")).startswith(("psd-shell:","psd-return-shield:","psd-gutter:")) for m in d.values() for level in m.get("levels",{}).values() for x in level))')"
 if [[ "$existing_psd_layer" == "True" ]]; then
     echo "PSD live probe: a PSD shell/return-shield layer is already mapped; refusing to create a duplicate." >&2
     exit 1
@@ -292,6 +292,12 @@ for monitor in monitors:
     name = monitor["name"]
     expected_shell = f"psd-shell:{name}"
     forbidden_shield = f"psd-return-shield:{name}"
+    expected_gutters = {
+        f"psd-gutter:{name}:left",
+        f"psd-gutter:{name}:right",
+        f"psd-gutter:{name}:top",
+        f"psd-gutter:{name}:dash",
+    }
     monitor_layers = layers.get(name, {}).get("levels", {})
     namespaces = [
         layer.get("namespace", "")
@@ -302,6 +308,8 @@ for monitor in monitors:
     if namespaces.count(expected_shell) != 1:
         raise SystemExit(1)
     if forbidden_shield in namespaces:
+        raise SystemExit(1)
+    if not expected_gutters.issubset(set(namespaces)):
         raise SystemExit(1)
 
     seen_shells.extend(ns for ns in namespaces if ns.startswith("psd-shell:"))
@@ -324,7 +332,7 @@ if [[ "$ready" != "1" ]]; then
     exit 1
 fi
 
-echo "PSD live probe: $monitor_count monitor-local shell surface(s), CENTER shields unmapped PASS"
+echo "PSD live probe: $monitor_count monitor-local shell + four CENTER gutter surface(s) per monitor PASS"
 
 if [[ "${PSD_PROBE_EXERCISE_HOTPLUG:-0}" == "1" ]]; then
     baseline_monitors="$(hyprctl -j monitors)"
@@ -357,6 +365,15 @@ namespaces = [
 if namespaces.count(f"psd-shell:{name}") != 1:
     raise SystemExit(1)
 if f"psd-return-shield:{name}" in namespaces:
+    raise SystemExit(1)
+
+expected_gutters = {
+    f"psd-gutter:{name}:left",
+    f"psd-gutter:{name}:right",
+    f"psd-gutter:{name}:top",
+    f"psd-gutter:{name}:dash",
+}
+if not expected_gutters.issubset(set(namespaces)):
     raise SystemExit(1)
 
 print(name)
@@ -816,6 +833,8 @@ namespaces = {
 }
 if f"psd-shell:{monitor}" in namespaces or f"psd-return-shield:{monitor}" in namespaces:
     raise SystemExit(1)
+if any(ns.startswith(f"psd-gutter:{monitor}:") for ns in namespaces):
+    raise SystemExit(1)
 
 if any(x.get("monitor") == monitor for x in state.get("trackedTransforms", [])):
     raise SystemExit(1)
@@ -870,6 +889,14 @@ namespaces = [
 if namespaces.count(f"psd-shell:{monitor}") != 1:
     raise SystemExit(1)
 if f"psd-return-shield:{monitor}" in namespaces:
+    raise SystemExit(1)
+expected_gutters = {
+    f"psd-gutter:{monitor}:left",
+    f"psd-gutter:{monitor}:right",
+    f"psd-gutter:{monitor}:top",
+    f"psd-gutter:{monitor}:dash",
+}
+if not expected_gutters.issubset(set(namespaces)):
     raise SystemExit(1)
 if any(x.get("monitor") == monitor for x in state.get("trackedTransforms", [])):
     raise SystemExit(1)

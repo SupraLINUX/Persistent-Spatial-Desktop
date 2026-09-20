@@ -15,19 +15,6 @@ Item {
         SpatialLayout.viewportSize = Qt.size(width, height)
     }
 
-    function armEdge(destination) {
-        if (SpatialState.currentSurface !== "center" || SpatialMotion.running)
-            return
-
-        edgeTimer.destination = destination
-        edgeTimer.restart()
-    }
-
-    function disarmEdge(destination) {
-        if (edgeTimer.destination === destination)
-            edgeTimer.stop()
-    }
-
     Component.onCompleted: syncViewport()
     onWidthChanged: syncViewport()
     onHeightChanged: syncViewport()
@@ -100,73 +87,6 @@ Item {
             returnEnabled: SpatialState.currentSurface !== "center" && !SpatialMotion.running
             onRequestCenter: SpatialMotion.center()
         }
-    }
-
-    Timer {
-        id: edgeTimer
-        property string destination: ""
-        interval: 180
-        repeat: false
-        onTriggered: {
-            if (SpatialState.currentSurface === "center" && !SpatialMotion.running)
-                SpatialMotion.navigate(destination)
-        }
-    }
-
-    MouseArea {
-        anchors.left: parent.left
-        anchors.top: parent.top
-        anchors.bottom: parent.bottom
-        anchors.topMargin: root.gutter
-        anchors.bottomMargin: root.gutter
-        width: root.gutter
-        z: 100
-        hoverEnabled: true
-        enabled: SpatialState.currentSurface === "center" && !SpatialMotion.running
-        onEntered: root.armEdge("left")
-        onExited: root.disarmEdge("left")
-    }
-
-    MouseArea {
-        anchors.right: parent.right
-        anchors.top: parent.top
-        anchors.bottom: parent.bottom
-        anchors.topMargin: root.gutter
-        anchors.bottomMargin: root.gutter
-        width: root.gutter
-        z: 100
-        hoverEnabled: true
-        enabled: SpatialState.currentSurface === "center" && !SpatialMotion.running
-        onEntered: root.armEdge("right")
-        onExited: root.disarmEdge("right")
-    }
-
-    MouseArea {
-        anchors.left: parent.left
-        anchors.right: parent.right
-        anchors.top: parent.top
-        anchors.leftMargin: root.gutter
-        anchors.rightMargin: root.gutter
-        height: root.gutter
-        z: 100
-        hoverEnabled: true
-        enabled: SpatialState.currentSurface === "center" && !SpatialMotion.running
-        onEntered: root.armEdge("top")
-        onExited: root.disarmEdge("top")
-    }
-
-    MouseArea {
-        anchors.left: parent.left
-        anchors.right: parent.right
-        anchors.bottom: parent.bottom
-        anchors.leftMargin: root.gutter
-        anchors.rightMargin: root.gutter
-        height: root.gutter
-        z: 100
-        hoverEnabled: true
-        enabled: SpatialState.currentSurface === "center" && !SpatialMotion.running
-        onEntered: root.armEdge("dash")
-        onExited: root.disarmEdge("dash")
     }
 
     Rectangle {

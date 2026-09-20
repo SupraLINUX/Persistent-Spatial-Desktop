@@ -36,6 +36,7 @@ private:
         QPointer<QQmlContext> context;
         QPointer<QQuickWindow> window;
         QPointer<QQuickWindow> returnShield;
+        QHash<QString, QPointer<QQuickWindow>> gutterWindows;
         QPointer<SpatialState> state;
         QPointer<SpatialLayout> layout;
         QPointer<SpatialMotionController> motion;
@@ -48,8 +49,15 @@ private:
     void destroyForScreen(QScreen *screen);
     bool createShellWindow(Instance *instance);
     void destroyShellWindow(Instance *instance);
+    bool createGutterWindows(Instance *instance);
+    void destroyGutterWindows(Instance *instance);
     void configureLayerSurface(Instance *instance);
+    void configureGutterSurface(
+        Instance *instance,
+        QQuickWindow *window,
+        const QString &destination);
     void configureReturnShield(Instance *instance);
+    void updateGutterWindows(Instance *instance);
     void updateReturnShield(Instance *instance);
     void updateFullscreenState(Instance *instance);
     void updateAllFullscreenStates();
