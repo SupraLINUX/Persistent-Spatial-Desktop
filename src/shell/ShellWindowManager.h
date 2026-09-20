@@ -28,6 +28,7 @@ public:
 
     void start();
     [[nodiscard]] int windowCount() const noexcept;
+    bool shutdownCompositorSync(int timeoutMs = 1500);
 
 private:
     struct Instance {
