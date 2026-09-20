@@ -167,6 +167,8 @@ if [[ ! -x "$test_client_path" ]]; then
     exit 1
 fi
 
+bash "$(dirname "$0")/probe-vm-render-transform.sh" "$test_client_path" "$PLUGIN_PATH"
+
 PSD_PROBE_TEST_CLIENT="$test_client_path" \
 PSD_PROBE_EXERCISE_HOTPLUG=1 \
 PSD_PROBE_EXERCISE_CRASH_RECOVERY=1 \

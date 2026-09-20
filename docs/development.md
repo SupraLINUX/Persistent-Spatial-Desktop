@@ -95,7 +95,8 @@ It then connects to Hyprland's documented command and event UNIX sockets.
 - no compositor polling loop;
 - unit tests for tokens, spatial state, responsive geometry, motion authority, Hyprland protocol parsing and compositor reset sequencing;
 - GitHub-hosted Ubuntu 26.04 KVM/QEMU integration with guest DRM/KMS, seatd, Hyprland, the real Qt/Wayland shell and compositor plugin;
-- deterministic Qt/Wayland integration client used to keep workspaces alive and request fullscreen during compositor lifecycle validation.
+- deterministic Qt/Wayland integration client used to keep workspaces alive, request fullscreen and paint exact solid colors for pixel-level compositor validation;
+- QEMU pixel-evidence probe using `grim` + Pillow to distinguish compositor render translation from logical window geometry for tiled, floating and pinned windows.
 
 ## Current compositor boundary
 
@@ -134,11 +135,14 @@ The `ubuntu-26-04-qemu` CI job boots the pinned Ubuntu Minimal 26.04 release ins
 - Hyprland 0.53.x on the guest's native Virtio DRM/KMS output;
 - the ABI-sensitive PSD Hyprland plugin;
 - the real `psd-shell` over Qt Wayland;
-- the live compositor lifecycle probe.
+- the live compositor lifecycle probe;
+- a screenshot-based render-transform probe that measures actual client pixels before/after/reset while requiring `j/clients` geometry to remain unchanged.
 
 The image URL is release-dated rather than `current`, and the harness verifies the cached/downloaded QCOW2 against Canonical's `SHA256SUMS` before booting it.
 
-The VM validates compositor semantics and lifecycle. It does **not** validate physical-device properties such as touchpad feel, NVIDIA-specific behavior, direct-scanout performance, VRR, real mixed-DPI displays or perceptual latency.
+The VM validates compositor semantics, lifecycle and visible render translation. For the render proof it creates deterministic colored Wayland clients in tiled, floating and pinned states, applies an inward 96-logical-unit workspace render offset, captures the real output with `grim`, correlates the client-color mask with Pillow, and then verifies reset. It also requires Hyprland's logical client geometry to stay unchanged, proving that the experimental path is render-only rather than a window move.
+
+It does **not** validate physical-device properties such as touchpad feel, NVIDIA-specific behavior, direct-scanout performance, VRR, real mixed-DPI displays or perceptual latency.
 
 `tests/integration/probe-hyprland-plugin.sh` remains useful independently on any Linux machine exposing a DRM render node. The manual `.github/workflows/vm-integration.yml` workflow runs the same QEMU harness on demand.
 
