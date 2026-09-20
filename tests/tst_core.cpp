@@ -60,6 +60,11 @@ public:
         setWindows(windows);
     }
 
+    void notifyMonitorsChanged()
+    {
+        emit monitorsChanged();
+    }
+
     void setSpatialTransformAvailable(bool available)
     {
         if (m_spatialTransformAvailable == available)
@@ -118,6 +123,7 @@ private slots:
     void spatialGestureCommitsByVelocity();
     void spatialGestureCancelsExplicitly();
     void spatialCompositorSyncSerializesFinalReset();
+    void spatialCompositorSyncRetargetsCurrentOffset();
     void spatialCompositorSyncShutdownDrainsFinalReset();
     void hyprlandSocketPaths();
     void hyprlandEventParsing();
@@ -385,6 +391,41 @@ void CoreTest::spatialCompositorSyncSerializesFinalReset()
     bridge.finishTransformCommand(finalReset.id);
     QVERIFY(sync.idle());
     QVERIFY(sync.lastError().isEmpty());
+}
+
+void CoreTest::spatialCompositorSyncRetargetsCurrentOffset()
+{
+    SpatialState state;
+    SpatialLayout layout;
+    layout.setViewportSize(QSizeF(1280, 800));
+
+    SpatialMotionController motion(&state, &layout);
+    TestCompositorBridge bridge;
+    bridge.setSpatialTransformAvailable(true);
+
+    SpatialCompositorSync sync(
+        &motion, &bridge, QStringLiteral("DP-1"));
+
+    sync.setEnabled(true);
+    bridge.finishTransformCommand(bridge.transformCommands().at(0).id);
+
+    QVERIFY(motion.beginGesture());
+    QVERIFY(motion.updateGesture(120.0, 0.0));
+
+    const quint64 firstOffsetId = bridge.transformCommands().last().id;
+    bridge.finishTransformCommand(firstOffsetId);
+    QVERIFY(sync.idle());
+
+    const int commandCountBeforeRetarget = bridge.transformCommands().size();
+    bridge.notifyMonitorsChanged();
+
+    QCOMPARE(bridge.transformCommands().size(), commandCountBeforeRetarget + 1);
+    const auto retarget = bridge.transformCommands().last();
+    QVERIFY(!retarget.reset);
+    QCOMPARE(retarget.offset, motion.offset());
+
+    bridge.finishTransformCommand(retarget.id);
+    QVERIFY(sync.idle());
 }
 
 void CoreTest::spatialCompositorSyncShutdownDrainsFinalReset()
