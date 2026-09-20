@@ -1,15 +1,17 @@
 #include "compositor/SpatialCompositorSync.h"
 
-#include "compositor/HyprlandIpcBridge.h"
+#include "compositor/CompositorBridge.h"
 #include "core/SpatialMotionController.h"
 
+#include <QEventLoop>
+#include <QTimer>
 #include <QtGlobal>
 
 #include <utility>
 
 SpatialCompositorSync::SpatialCompositorSync(
     SpatialMotionController *motion,
-    HyprlandIpcBridge *bridge,
+    CompositorBridge *bridge,
     QString monitorName,
     QObject *parent)
     : QObject(parent)
@@ -23,21 +25,31 @@ SpatialCompositorSync::SpatialCompositorSync(
     connect(m_motion, &SpatialMotionController::offsetChanged,
             this, &SpatialCompositorSync::queueCurrentOffset);
 
-    connect(m_bridge, &CompositorBridge::capabilitiesChanged, this, [this] {
-        emit activeChanged();
-        if (active())
-            queueCurrentOffset();
-    });
+    connect(m_bridge, &CompositorBridge::capabilitiesChanged,
+            this, &SpatialCompositorSync::handleBridgeAvailabilityChanged);
+    connect(m_bridge, &CompositorBridge::availableChanged,
+            this, &SpatialCompositorSync::handleBridgeAvailabilityChanged);
 
-    connect(m_bridge, &HyprlandIpcBridge::experimentalSpatialCommandFinished,
+    connect(m_bridge, &CompositorBridge::spatialTransformCommandFinished,
             this,
-            [this](const QString &monitorName, bool success, const QString &message) {
-        if (monitorName != m_monitorName)
+            [this](
+                quint64 commandId,
+                const QString &monitorName,
+                bool success,
+                const QString &message) {
+        if (monitorName != m_monitorName || commandId != m_inFlightCommandId)
             return;
 
-        m_inFlight = false;
+        const bool completedReset = m_inFlightReset;
+        m_inFlightCommandId = 0;
+        m_inFlightReset = false;
+
+        if (success && completedReset)
+            m_transformMayBeOffset = false;
+
         setLastError(success ? QString{} : message);
         dispatchPending();
+        emitSettledIfIdle();
     });
 }
 
@@ -51,29 +63,33 @@ void SpatialCompositorSync::setEnabled(bool enabled)
     if (m_enabled == enabled)
         return;
 
-    const bool wasActive = active();
     m_enabled = enabled;
     emit enabledChanged();
     emit activeChanged();
 
     if (m_enabled) {
+        m_resetRequested = false;
         queueCurrentOffset();
         return;
     }
 
     m_hasPending = false;
-    if (wasActive)
-        m_bridge->resetExperimentalSpatialOffset(m_monitorName);
+
+    if (m_transformMayBeOffset || m_inFlightCommandId != 0)
+        m_resetRequested = true;
+
+    dispatchPending();
+    emitSettledIfIdle();
 }
 
 bool SpatialCompositorSync::active() const
 {
-    if (!m_enabled || !m_bridge->available())
-        return false;
+    return m_enabled && m_bridge->spatialTransformAvailable();
+}
 
-    const QVariantMap capabilities = m_bridge->capabilities();
-    return capabilities.value(QStringLiteral("spatialRenderOffsetExperimental")).toBool()
-        && capabilities.value(QStringLiteral("monitorTargeting")).toBool();
+bool SpatialCompositorSync::idle() const noexcept
+{
+    return m_inFlightCommandId == 0 && !m_hasPending && !m_resetRequested;
 }
 
 QString SpatialCompositorSync::monitorName() const
@@ -84,6 +100,47 @@ QString SpatialCompositorSync::monitorName() const
 QString SpatialCompositorSync::lastError() const
 {
     return m_lastError;
+}
+
+bool SpatialCompositorSync::shutdownAndReset(int timeoutMs)
+{
+    const int boundedTimeoutMs = std::max(0, timeoutMs);
+
+    if (m_enabled)
+        setEnabled(false);
+    else if (m_transformMayBeOffset || m_inFlightCommandId != 0) {
+        m_hasPending = false;
+        m_resetRequested = true;
+        dispatchPending();
+    }
+
+    if (idle())
+        return !m_transformMayBeOffset && m_lastError.isEmpty();
+
+    QEventLoop loop;
+    QTimer timeout;
+    timeout.setSingleShot(true);
+
+    connect(this, &SpatialCompositorSync::settled, &loop, &QEventLoop::quit);
+    connect(&timeout, &QTimer::timeout, &loop, &QEventLoop::quit);
+
+    timeout.start(boundedTimeoutMs);
+    loop.exec();
+
+    return idle() && !m_transformMayBeOffset && m_lastError.isEmpty();
+}
+
+void SpatialCompositorSync::handleBridgeAvailabilityChanged()
+{
+    emit activeChanged();
+
+    if (m_resetRequested) {
+        dispatchPending();
+        return;
+    }
+
+    if (active())
+        queueCurrentOffset();
 }
 
 void SpatialCompositorSync::queueCurrentOffset()
@@ -98,17 +155,35 @@ void SpatialCompositorSync::queueCurrentOffset()
 
 void SpatialCompositorSync::dispatchPending()
 {
-    if (!active() || m_inFlight || !m_hasPending)
+    if (m_inFlightCommandId != 0)
+        return;
+
+    if (m_resetRequested) {
+        if (!m_bridge->spatialTransformAvailable())
+            return;
+
+        m_resetRequested = false;
+        m_inFlightReset = true;
+        m_inFlightCommandId = m_bridge->resetSpatialTransformOffset(m_monitorName);
+        return;
+    }
+
+    if (!active() || !m_hasPending)
         return;
 
     const QPointF offset = m_pendingOffset;
     m_hasPending = false;
-    m_inFlight = true;
 
-    if (qFuzzyIsNull(offset.x()) && qFuzzyIsNull(offset.y()))
-        m_bridge->resetExperimentalSpatialOffset(m_monitorName);
-    else
-        m_bridge->setExperimentalSpatialOffset(m_monitorName, offset.x(), offset.y());
+    if (qFuzzyIsNull(offset.x()) && qFuzzyIsNull(offset.y())) {
+        m_inFlightReset = true;
+        m_inFlightCommandId = m_bridge->resetSpatialTransformOffset(m_monitorName);
+        return;
+    }
+
+    m_inFlightReset = false;
+    m_transformMayBeOffset = true;
+    m_inFlightCommandId =
+        m_bridge->setSpatialTransformOffset(m_monitorName, offset.x(), offset.y());
 }
 
 void SpatialCompositorSync::setLastError(const QString &error)
@@ -118,4 +193,10 @@ void SpatialCompositorSync::setLastError(const QString &error)
 
     m_lastError = error;
     emit lastErrorChanged();
+}
+
+void SpatialCompositorSync::emitSettledIfIdle()
+{
+    if (idle())
+        emit settled();
 }
