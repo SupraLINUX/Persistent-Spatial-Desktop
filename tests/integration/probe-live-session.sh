@@ -664,9 +664,37 @@ PY
 
     if [[ -n "$test_client_path" ]]; then
         fullscreen_title="psd-probe-fullscreen"
-        "$test_client_path" --title "$fullscreen_title" --fullscreen >>"$client_log_file" 2>&1 &
+        "$test_client_path" --title "$fullscreen_title" >>"$client_log_file" 2>&1 &
         fullscreen_pid=$!
         client_pids+=("$fullscreen_pid")
+
+        fullscreen_client_ready=0
+        for _ in $(seq 1 50); do
+            clients_json="$(hyprctl -j clients)"
+            if python3 - "$clients_json" "$fullscreen_title" <<'PY' >/dev/null 2>&1
+import json
+import sys
+
+clients = json.loads(sys.argv[1])
+title = sys.argv[2]
+raise SystemExit(0 if any(c.get("title") == title for c in clients) else 1)
+PY
+            then
+                fullscreen_client_ready=1
+                break
+            fi
+            sleep 0.1
+        done
+
+        if [[ "$fullscreen_client_ready" != "1" ]]; then
+            echo "PSD live probe: fullscreen integration client did not map." >&2
+            hyprctl -j clients >&2 || true
+            cat "$client_log_file" >&2 || true
+            exit 1
+        fi
+
+        hyprctl dispatch focuswindow "title:^$fullscreen_title$" | grep -qx "ok"
+        hyprctl dispatch fullscreen 0 | grep -qx "ok"
 
         fullscreen_ready=0
         for _ in $(seq 1 60); do
@@ -719,8 +747,7 @@ PY
 
         echo "PSD live probe: fullscreen enter suppresses shell + resets transform PASS"
 
-        kill -TERM "$fullscreen_pid" >/dev/null 2>&1 || true
-        wait "$fullscreen_pid" >/dev/null 2>&1 || true
+        hyprctl dispatch fullscreen 0 | grep -qx "ok"
 
         fullscreen_exit_ready=0
         for _ in $(seq 1 60); do
@@ -738,7 +765,8 @@ state = json.loads(sys.argv[3])
 monitor = sys.argv[4]
 title = sys.argv[5]
 
-if any(c.get("title") == title for c in clients):
+client = next((c for c in clients if c.get("title") == title), None)
+if client is None or int(client.get("fullscreen", 0) or 0) != 0:
     raise SystemExit(1)
 
 namespaces = [
@@ -770,6 +798,9 @@ PY
         fi
 
         echo "PSD live probe: fullscreen exit remaps clean CENTER shell PASS"
+
+        kill -TERM "$fullscreen_pid" >/dev/null 2>&1 || true
+        wait "$fullscreen_pid" >/dev/null 2>&1 || true
     fi
 
     if [[ -n "$hotplug_monitor" ]]; then
