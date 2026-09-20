@@ -251,9 +251,16 @@ ssh_guest '
 echo "PSD QEMU probe: starting seatd for native guest DRM/KMS"
 ssh_guest '
     set -euo pipefail
+
+    sudo systemctl stop seatd.service >/dev/null 2>&1 || true
+    sudo systemctl stop psd-seatd.service >/dev/null 2>&1 || true
     sudo rm -f /run/seatd.sock
-    sudo sh -c "SEATD_VTBOUND=0 exec seatd -g video -l debug >/tmp/psd-seatd.log 2>&1" &
-    seatd_launcher_pid=$!
+
+    sudo systemd-run \
+        --unit=psd-seatd \
+        --collect \
+        --property=Environment=SEATD_VTBOUND=0 \
+        /usr/bin/seatd -g video -l debug >/dev/null
 
     seatd_ready=0
     for _ in $(seq 1 100); do
@@ -262,9 +269,9 @@ ssh_guest '
             break
         fi
 
-        if ! kill -0 "$seatd_launcher_pid" >/dev/null 2>&1; then
+        if ! sudo systemctl is-active --quiet psd-seatd.service; then
             echo "PSD QEMU probe: seatd exited before its socket became ready" >&2
-            cat /tmp/psd-seatd.log >&2 || true
+            sudo journalctl -u psd-seatd.service --no-pager -n 100 >&2 || true
             exit 1
         fi
 
@@ -273,7 +280,7 @@ ssh_guest '
 
     if [[ "$seatd_ready" != "1" ]]; then
         echo "PSD QEMU probe: seatd socket did not become ready" >&2
-        cat /tmp/psd-seatd.log >&2 || true
+        sudo journalctl -u psd-seatd.service --no-pager -n 100 >&2 || true
         exit 1
     fi
 
