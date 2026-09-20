@@ -83,6 +83,21 @@ Without this handshake, compositor motion sync remains disabled.
 
 The experimental plugin can emit `psdgesturebegin`, `psdgestureupdate`, and `psdgestureend` over Hyprland's existing event socket. The plugin does **not** intercept four-finger swipes merely because it is loaded: `plugin:psd:gesture-events 1` must be explicitly enabled. Three-finger gestures remain untouched.
 
+### Experimental diagnostic state
+
+The plugin also registers `j/psd-plugin-state` for integration diagnostics. This is **not** a public PSD API and does not change the protocol-v3 capability contract.
+
+The JSON response exposes only experiment-owned state needed by probes:
+
+- currently tracked monitor transforms;
+- the last requested x/y offset for each tracked monitor;
+- an opaque monotonically increasing workspace-generation value;
+- the count of previous-workspace resets caused by retargeting;
+- touched-workspace count;
+- gesture arm/active state.
+
+The workspace generation is intentionally opaque. It exists so a live integration probe can prove that a non-zero transform was retargeted to a different workspace without exposing Hyprland workspace internals as a PSD contract.
+
 ## Phase 2: spatial transform
 
 The public IPC state bridge is not expected to be sufficient for the defining PSD operation: transforming CENTER and compositor-owned windows as one coherent spatial unit.
