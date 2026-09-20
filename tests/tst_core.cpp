@@ -1,5 +1,6 @@
 #include "compositor/CompositorBridge.h"
 #include "compositor/HyprlandProtocol.h"
+#include "compositor/SpatialCompositorSync.h"
 #include "core/DesignTokens.h"
 #include "core/SpatialLayout.h"
 #include "core/SpatialMotionController.h"
@@ -13,11 +14,40 @@
 class TestCompositorBridge final : public CompositorBridge
 {
 public:
+    struct TransformCommand {
+        quint64 id = 0;
+        QString monitorName;
+        QPointF offset;
+        bool reset = false;
+    };
+
     using CompositorBridge::CompositorBridge;
 
     QString backendName() const override
     {
         return QStringLiteral("test");
+    }
+
+    bool spatialTransformAvailable() const override
+    {
+        return m_spatialTransformAvailable;
+    }
+
+    quint64 setSpatialTransformOffset(
+        const QString &monitorName, double x, double y) override
+    {
+        const quint64 commandId = allocateSpatialTransformCommandId();
+        m_transformCommands.push_back(
+            TransformCommand{commandId, monitorName, QPointF{x, y}, false});
+        return commandId;
+    }
+
+    quint64 resetSpatialTransformOffset(const QString &monitorName) override
+    {
+        const quint64 commandId = allocateSpatialTransformCommandId();
+        m_transformCommands.push_back(
+            TransformCommand{commandId, monitorName, QPointF{}, true});
+        return commandId;
     }
 
     void start() override {}
@@ -28,6 +58,45 @@ public:
         setMonitors(monitors);
         setWindows(windows);
     }
+
+    void setSpatialTransformAvailable(bool available)
+    {
+        if (m_spatialTransformAvailable == available)
+            return;
+
+        m_spatialTransformAvailable = available;
+        emit capabilitiesChanged();
+    }
+
+    const QVector<TransformCommand> &transformCommands() const
+    {
+        return m_transformCommands;
+    }
+
+    void finishTransformCommand(
+        quint64 commandId,
+        bool success = true,
+        const QString &message = QStringLiteral("ok"))
+    {
+        const auto it = std::find_if(
+            m_transformCommands.cbegin(),
+            m_transformCommands.cend(),
+            [commandId](const TransformCommand &command) {
+                return command.id == commandId;
+            });
+
+        const QString monitorName =
+            it == m_transformCommands.cend()
+                ? QStringLiteral("DP-1")
+                : it->monitorName;
+
+        emit spatialTransformCommandFinished(
+            commandId, monitorName, success, message);
+    }
+
+private:
+    bool m_spatialTransformAvailable = false;
+    QVector<TransformCommand> m_transformCommands;
 };
 
 class CoreTest final : public QObject
@@ -47,6 +116,8 @@ private slots:
     void spatialGestureCommitsByDistance();
     void spatialGestureCommitsByVelocity();
     void spatialGestureCancelsExplicitly();
+    void spatialCompositorSyncSerializesFinalReset();
+    void spatialCompositorSyncShutdownDrainsFinalReset();
     void hyprlandSocketPaths();
     void hyprlandEventParsing();
     void hyprlandSpatialGestureParsing();
@@ -261,6 +332,94 @@ void CoreTest::spatialGestureCancelsExplicitly()
     QTRY_COMPARE_WITH_TIMEOUT(finishedSpy.count(), 1, 100);
     QCOMPARE(state.currentSurface(), QStringLiteral("center"));
     QCOMPARE(motion.offset(), QPointF());
+}
+
+void CoreTest::spatialCompositorSyncSerializesFinalReset()
+{
+    SpatialState state;
+    SpatialLayout layout;
+    layout.setViewportSize(QSizeF(1280, 800));
+
+    SpatialMotionController motion(&state, &layout);
+    TestCompositorBridge bridge;
+    bridge.setSpatialTransformAvailable(true);
+
+    SpatialCompositorSync sync(
+        &motion, &bridge, QStringLiteral("DP-1"));
+
+    sync.setEnabled(true);
+    QCOMPARE(bridge.transformCommands().size(), 1);
+    QVERIFY(bridge.transformCommands().at(0).reset);
+
+    bridge.finishTransformCommand(bridge.transformCommands().at(0).id);
+    QVERIFY(sync.idle());
+
+    QVERIFY(motion.beginGesture());
+    QVERIFY(motion.updateGesture(120.0, 0.0));
+
+    QCOMPARE(bridge.transformCommands().size(), 2);
+    const auto inFlight = bridge.transformCommands().at(1);
+    QVERIFY(!inFlight.reset);
+    QVERIFY(inFlight.offset.x() > 0.0);
+
+    QVERIFY(motion.updateGesture(80.0, 0.0));
+    QCOMPARE(bridge.transformCommands().size(), 2);
+
+    sync.setEnabled(false);
+    QCOMPARE(bridge.transformCommands().size(), 2);
+    QVERIFY(!sync.idle());
+
+    bridge.finishTransformCommand(inFlight.id + 1000);
+    QCOMPARE(bridge.transformCommands().size(), 2);
+    QVERIFY(!sync.idle());
+
+    bridge.finishTransformCommand(inFlight.id);
+
+    QCOMPARE(bridge.transformCommands().size(), 3);
+    const auto finalReset = bridge.transformCommands().at(2);
+    QVERIFY(finalReset.reset);
+    QCOMPARE(finalReset.monitorName, QStringLiteral("DP-1"));
+    QVERIFY(!sync.idle());
+
+    bridge.finishTransformCommand(finalReset.id);
+    QVERIFY(sync.idle());
+    QVERIFY(sync.lastError().isEmpty());
+}
+
+void CoreTest::spatialCompositorSyncShutdownDrainsFinalReset()
+{
+    SpatialState state;
+    SpatialLayout layout;
+    layout.setViewportSize(QSizeF(1280, 800));
+
+    SpatialMotionController motion(&state, &layout);
+    TestCompositorBridge bridge;
+    bridge.setSpatialTransformAvailable(true);
+
+    SpatialCompositorSync sync(
+        &motion, &bridge, QStringLiteral("DP-1"));
+
+    sync.setEnabled(true);
+    bridge.finishTransformCommand(bridge.transformCommands().at(0).id);
+
+    QVERIFY(motion.beginGesture());
+    QVERIFY(motion.updateGesture(120.0, 0.0));
+
+    const quint64 offsetCommandId = bridge.transformCommands().last().id;
+
+    QTimer::singleShot(0, &sync, [&bridge, &sync, offsetCommandId] {
+        bridge.finishTransformCommand(offsetCommandId);
+
+        QTimer::singleShot(0, &sync, [&bridge] {
+            const auto &commands = bridge.transformCommands();
+            QVERIFY(commands.last().reset);
+            bridge.finishTransformCommand(commands.last().id);
+        });
+    });
+
+    QVERIFY(sync.shutdownAndReset(200));
+    QVERIFY(sync.idle());
+    QVERIFY(sync.lastError().isEmpty());
 }
 
 void CoreTest::hyprlandSocketPaths()
