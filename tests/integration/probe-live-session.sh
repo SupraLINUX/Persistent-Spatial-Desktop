@@ -814,6 +814,138 @@ PY
         echo "PSD live probe: monitor hot-remove + shell teardown PASS"
     fi
 
+    if [[ "${PSD_PROBE_EXERCISE_CRASH_RECOVERY:-0}" == "1" ]]; then
+        hyprctl dispatch movecursor "$runtime_center_x $runtime_center_y" | grep -qx "ok"
+        sleep 0.1
+        hyprctl dispatch movecursor "$runtime_edge_x $runtime_edge_y" | grep -qx "ok"
+
+        crash_displaced=0
+        for _ in $(seq 1 40); do
+            layers_json="$(hyprctl -j layers)"
+            state_json="$(plugin_state)"
+
+            if python3 - "$layers_json" "$state_json" "$primary_monitor" <<'PY' >/dev/null 2>&1
+import json
+import sys
+
+layers = json.loads(sys.argv[1])
+state = json.loads(sys.argv[2])
+monitor = sys.argv[3]
+
+namespaces = {
+    layer.get("namespace", "")
+    for level in layers.get(monitor, {}).get("levels", {}).values()
+    for layer in level
+}
+if f"psd-return-shield:{monitor}" not in namespaces:
+    raise SystemExit(1)
+
+matches = [x for x in state.get("trackedTransforms", []) if x.get("monitor") == monitor]
+if len(matches) != 1 or len(state.get("trackedTransforms", [])) != 1:
+    raise SystemExit(1)
+
+transform = matches[0]
+if abs(float(transform.get("x", 0.0))) < 1.0 and abs(float(transform.get("y", 0.0))) < 1.0:
+    raise SystemExit(1)
+PY
+            then
+                crash_displaced=1
+                break
+            fi
+
+            sleep 0.1
+        done
+
+        if [[ "$crash_displaced" != "1" ]]; then
+            echo "PSD live probe: could not establish displaced state before SIGKILL recovery test." >&2
+            hyprctl -j layers >&2 || true
+            plugin_state >&2 || true
+            exit 1
+        fi
+
+        sleep 0.6
+        kill -KILL "$shell_pid"
+        wait "$shell_pid" >/dev/null 2>&1 || true
+        shell_pid=""
+
+        residual_state="$(plugin_state)"
+        recovery_mode="$(
+            python3 - "$residual_state" "$primary_monitor" <<'PY'
+import json
+import sys
+
+state = json.loads(sys.argv[1])
+monitor = sys.argv[2]
+matches = [x for x in state.get("trackedTransforms", []) if x.get("monitor") == monitor]
+
+if not matches:
+    print("already-clean")
+else:
+    transform = matches[0]
+    if abs(float(transform.get("x", 0.0))) < 1.0 and abs(float(transform.get("y", 0.0))) < 1.0:
+        print("already-clean")
+    else:
+        print("residual")
+PY
+        )"
+
+        echo "PSD live probe: SIGKILL compositor state after shell death = $recovery_mode"
+
+        hyprctl dispatch movecursor "$runtime_center_x $runtime_center_y" | grep -qx "ok"
+
+        PSD_EXPERIMENTAL_HYPRLAND_SYNC=1 "$SHELL_PATH" >>"$log_file" 2>&1 &
+        shell_pid=$!
+
+        recovery_ready=0
+        for _ in $(seq 1 80); do
+            if ! kill -0 "$shell_pid" >/dev/null 2>&1; then
+                echo "PSD live probe: psd-shell exited during SIGKILL recovery restart." >&2
+                cat "$log_file" >&2 || true
+                exit 1
+            fi
+
+            layers_json="$(hyprctl -j layers)"
+            state_json="$(plugin_state)"
+
+            if python3 - "$layers_json" "$state_json" "$primary_monitor" <<'PY' >/dev/null 2>&1
+import json
+import sys
+
+layers = json.loads(sys.argv[1])
+state = json.loads(sys.argv[2])
+monitor = sys.argv[3]
+
+namespaces = [
+    layer.get("namespace", "")
+    for level in layers.get(monitor, {}).get("levels", {}).values()
+    for layer in level
+]
+if namespaces.count(f"psd-shell:{monitor}") != 1:
+    raise SystemExit(1)
+if f"psd-return-shield:{monitor}" in namespaces:
+    raise SystemExit(1)
+if state.get("trackedTransforms"):
+    raise SystemExit(1)
+PY
+            then
+                recovery_ready=1
+                break
+            fi
+
+            sleep 0.1
+        done
+
+        if [[ "$recovery_ready" != "1" ]]; then
+            echo "PSD live probe: restart after SIGKILL did not recover a clean CENTER state." >&2
+            hyprctl -j layers >&2 || true
+            plugin_state >&2 || true
+            cat "$log_file" >&2 || true
+            exit 1
+        fi
+
+        echo "PSD live probe: SIGKILL + restart recovery to clean CENTER PASS"
+    fi
+
     kill -TERM "$shell_pid"
 
     shell_exited=0

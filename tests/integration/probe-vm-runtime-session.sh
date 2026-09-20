@@ -169,6 +169,7 @@ fi
 
 PSD_PROBE_TEST_CLIENT="$test_client_path" \
 PSD_PROBE_EXERCISE_HOTPLUG=1 \
+PSD_PROBE_EXERCISE_CRASH_RECOVERY=1 \
 PSD_PROBE_EXERCISE_RUNTIME=1 \
     bash "$(dirname "$0")/probe-live-session.sh" "$SHELL_PATH" "$PLUGIN_PATH"
 

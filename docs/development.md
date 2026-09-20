@@ -187,12 +187,13 @@ That opt-in mode uses the real shell input path rather than a test-only shell AP
 7. requires a new workspace generation; when the previous workspace remains alive, it also requires an explicit previous-workspace reset;
 8. when the integration client is available, requests real Wayland fullscreen and requires PSD surfaces to unmap plus the compositor transform to reset;
 9. requires fullscreen exit to remap a clean CENTER shell;
-10. sends SIGTERM to `psd-shell` and requires zero tracked transforms afterward;
-11. restores the original workspace and cursor position.
+10. with `PSD_PROBE_EXERCISE_CRASH_RECOVERY=1`, displaces CENTER again, kills `psd-shell` with SIGKILL, restarts it, and requires startup recovery to clear any residual compositor transform and map clean CENTER;
+11. sends SIGTERM to the recovered shell and requires zero tracked transforms afterward;
+12. restores the original workspace and cursor position.
 
 With `PSD_PROBE_EXERCISE_HOTPLUG=1`, the same live shell also receives a temporary headless output. The probe requires its independent CENTER surface to appear, verifies the primary monitor is the only transformed output during navigation, and removes the temporary output again while the shell is still alive.
 
-The QEMU CI enables the deterministic client and hotplug paths automatically. On arbitrary real hardware those paths remain opt-in so the probe does not create windows or virtual outputs unless explicitly requested.
+The QEMU CI enables the deterministic client, hotplug and SIGKILL-recovery paths automatically. On arbitrary real hardware those paths remain opt-in so the probe does not create windows or virtual outputs unless explicitly requested.
 
 GitHub-hosted CI also runs `tests/integration/test-probe-live-session-mock.sh`. That test uses a fake `hyprctl` and fake shell process only to validate the probe's control flow, cleanup ownership, CENTER-layer expectations and error handling. It is not compositor validation and does not replace the real-session probe.
 
