@@ -21,15 +21,16 @@ public:
     [[nodiscard]] QString backendName() const override;
     [[nodiscard]] QString instanceSignature() const;
 
+    [[nodiscard]] bool spatialTransformAvailable() const override;
+    quint64 setSpatialTransformOffset(const QString &monitorName, double x, double y) override;
+    quint64 resetSpatialTransformOffset(const QString &monitorName) override;
+
     void start() override;
     Q_INVOKABLE void refreshAll() override;
     Q_INVOKABLE void refreshCapabilities();
-    Q_INVOKABLE void setExperimentalSpatialOffset(const QString &monitorName, double x, double y);
-    Q_INVOKABLE void resetExperimentalSpatialOffset(const QString &monitorName);
 
 signals:
     void instanceSignatureChanged();
-    void experimentalSpatialCommandFinished(const QString &monitorName, bool success, const QString &message);
     void experimentalSpatialGestureBegin(const QString &monitorName);
     void experimentalSpatialGestureUpdate(const QString &monitorName, double deltaX, double deltaY);
     void experimentalSpatialGestureEnd(const QString &monitorName, double velocityX, double velocityY, bool cancelled);
