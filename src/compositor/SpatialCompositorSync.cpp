@@ -7,6 +7,7 @@
 #include <QTimer>
 #include <QtGlobal>
 
+#include <algorithm>
 #include <utility>
 
 SpatialCompositorSync::SpatialCompositorSync(
