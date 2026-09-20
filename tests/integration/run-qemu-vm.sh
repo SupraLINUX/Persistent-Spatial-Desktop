@@ -66,7 +66,8 @@ expected_image_sha256="$(
     awk -v wanted="$image_name" '
         {
             name=$2
-            sub(/^\\*/, "", name)
+            if (substr(name, 1, 1) == "*")
+                name=substr(name, 2)
             if (name == wanted) {
                 print $1
                 exit
