@@ -4,7 +4,7 @@
 #include <QPointF>
 #include <QString>
 
-class HyprlandIpcBridge;
+class CompositorBridge;
 class SpatialMotionController;
 
 class SpatialCompositorSync final : public QObject
@@ -18,7 +18,7 @@ class SpatialCompositorSync final : public QObject
 public:
     SpatialCompositorSync(
         SpatialMotionController *motion,
-        HyprlandIpcBridge *bridge,
+        CompositorBridge *bridge,
         QString monitorName,
         QObject *parent = nullptr);
 
@@ -26,25 +26,34 @@ public:
     void setEnabled(bool enabled);
 
     [[nodiscard]] bool active() const;
+    [[nodiscard]] bool idle() const noexcept;
     [[nodiscard]] QString monitorName() const;
     [[nodiscard]] QString lastError() const;
+
+    bool shutdownAndReset(int timeoutMs = 1200);
 
 signals:
     void enabledChanged();
     void activeChanged();
     void lastErrorChanged();
+    void settled();
 
 private:
+    void handleBridgeAvailabilityChanged();
     void queueCurrentOffset();
     void dispatchPending();
     void setLastError(const QString &error);
+    void emitSettledIfIdle();
 
     SpatialMotionController *m_motion = nullptr;
-    HyprlandIpcBridge *m_bridge = nullptr;
+    CompositorBridge *m_bridge = nullptr;
     QString m_monitorName;
     bool m_enabled = false;
-    bool m_inFlight = false;
     bool m_hasPending = false;
+    bool m_resetRequested = false;
+    bool m_inFlightReset = false;
+    bool m_transformMayBeOffset = false;
+    quint64 m_inFlightCommandId = 0;
     QPointF m_pendingOffset;
     QString m_lastError;
 };
