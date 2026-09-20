@@ -9,6 +9,7 @@
 
 #include <LayerShellQt/window.h>
 
+#include <QElapsedTimer>
 #include <QGuiApplication>
 #include <QQmlApplicationEngine>
 #include <QQmlComponent>
@@ -81,6 +82,38 @@ void ShellWindowManager::start()
 int ShellWindowManager::windowCount() const noexcept
 {
     return m_instances.size();
+}
+
+bool ShellWindowManager::shutdownCompositorSync(int timeoutMs)
+{
+    const int boundedTimeoutMs = std::max(0, timeoutMs);
+
+    for (Instance *instance : m_instances) {
+        if (instance && instance->compositorSync)
+            instance->compositorSync->setEnabled(false);
+    }
+
+    QElapsedTimer elapsed;
+    elapsed.start();
+
+    bool success = true;
+    for (Instance *instance : m_instances) {
+        if (!instance || !instance->compositorSync)
+            continue;
+
+        const int remainingMs =
+            std::max(0, boundedTimeoutMs - static_cast<int>(elapsed.elapsed()));
+        if (instance->compositorSync->shutdownAndReset(remainingMs))
+            continue;
+
+        success = false;
+        qWarning().noquote()
+            << "PSD failed to confirm final compositor reset for"
+            << instance->compositorSync->monitorName()
+            << instance->compositorSync->lastError();
+    }
+
+    return success;
 }
 
 void ShellWindowManager::createForScreen(QScreen *screen)
@@ -172,6 +205,14 @@ void ShellWindowManager::destroyForScreen(QScreen *screen)
     Instance *instance = m_instances.take(screen);
     if (!instance)
         return;
+
+    if (instance->compositorSync
+        && !instance->compositorSync->shutdownAndReset(250)) {
+        qWarning().noquote()
+            << "PSD could not confirm compositor reset while removing"
+            << instance->compositorSync->monitorName()
+            << instance->compositorSync->lastError();
+    }
 
     if (instance->returnShield) {
         instance->returnShield->close();
