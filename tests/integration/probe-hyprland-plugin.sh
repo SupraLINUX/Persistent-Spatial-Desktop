@@ -39,7 +39,17 @@ mkdir -p "$XDG_RUNTIME_DIR"
 chmod 700 "$XDG_RUNTIME_DIR"
 
 LOG_FILE="${TMPDIR:-/tmp}/psd-hyprland-headless.log"
-export HYPRLAND_HEADLESS_ONLY=1
+
+if [[ "${PSD_PROBE_USE_WAYLAND_BACKEND:-0}" == "1" ]]; then
+    if [[ -z "${WAYLAND_DISPLAY:-}" ]]; then
+        echo "PSD probe: nested Wayland mode requires WAYLAND_DISPLAY." >&2
+        exit 1
+    fi
+    unset HYPRLAND_HEADLESS_ONLY
+else
+    export HYPRLAND_HEADLESS_ONLY=1
+fi
+
 Hyprland --i-am-really-stupid --config "$CONFIG_PATH" >"$LOG_FILE" 2>&1 &
 HYPRLAND_PID=$!
 
