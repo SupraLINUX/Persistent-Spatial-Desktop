@@ -11,6 +11,26 @@
 #include <memory>
 #include <utility>
 
+namespace {
+
+bool compositorDiagnosticsEnabled()
+{
+    return qEnvironmentVariableIntValue("PSD_COMPOSITOR_DIAGNOSTICS") == 1;
+}
+
+void logSnapshot(const char *kind, const QVariantList &items)
+{
+    if (!compositorDiagnosticsEnabled())
+        return;
+
+    qInfo().noquote()
+        << "PSD_COMPOSITOR_DIAG"
+        << kind
+        << QJsonDocument::fromVariant(items).toJson(QJsonDocument::Compact);
+}
+
+} // namespace
+
 HyprlandIpcBridge::HyprlandIpcBridge(QObject *parent)
     : CompositorBridge(parent)
 {
@@ -23,6 +43,8 @@ HyprlandIpcBridge::HyprlandIpcBridge(QObject *parent)
     connect(&m_reconnectTimer, &QTimer::timeout, this, &HyprlandIpcBridge::connectEventStream);
 
     connect(&m_eventSocket, &QLocalSocket::connected, this, [this] {
+        if (compositorDiagnosticsEnabled())
+            qInfo().noquote() << "PSD_COMPOSITOR_DIAG event-socket connected" << m_eventSocketPath;
         setEventStreamConnected(true);
         setLastError({});
         scheduleRefresh(RefreshEverything);
@@ -32,6 +54,8 @@ HyprlandIpcBridge::HyprlandIpcBridge(QObject *parent)
     connect(&m_eventSocket, &QLocalSocket::readyRead, this, &HyprlandIpcBridge::handleEventData);
 
     connect(&m_eventSocket, &QLocalSocket::disconnected, this, [this] {
+        if (compositorDiagnosticsEnabled())
+            qInfo().noquote() << "PSD_COMPOSITOR_DIAG event-socket disconnected";
         cancelSpatialGestures();
         setEventStreamConnected(false);
         setCapabilities({});
@@ -255,6 +279,12 @@ void HyprlandIpcBridge::handleEventLine(const QByteArray &line)
     if (!event.valid)
         return;
 
+    if (compositorDiagnosticsEnabled())
+        qInfo().noquote()
+            << "PSD_COMPOSITOR_DIAG event"
+            << event.name
+            << event.payload;
+
     emit compositorEvent(event.name, event.payload);
 
     if (event.name == QStringLiteral("psdpluginready")) {
@@ -396,6 +426,7 @@ void HyprlandIpcBridge::refreshMonitors()
             setLastError(QStringLiteral("Invalid Hyprland monitor response: %1").arg(error));
             return;
         }
+        logSnapshot("monitors", monitors);
         setMonitors(monitors);
     });
 }
@@ -409,6 +440,7 @@ void HyprlandIpcBridge::refreshWorkspaces()
             setLastError(QStringLiteral("Invalid Hyprland workspace response: %1").arg(error));
             return;
         }
+        logSnapshot("workspaces", workspaces);
         setWorkspaces(workspaces);
     });
 }
@@ -422,6 +454,7 @@ void HyprlandIpcBridge::refreshWindows()
             setLastError(QStringLiteral("Invalid Hyprland client response: %1").arg(error));
             return;
         }
+        logSnapshot("windows", windows);
         setWindows(windows);
     });
 }

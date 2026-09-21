@@ -561,6 +561,17 @@ void ShellWindowManager::updateFullscreenState(Instance *instance)
     const bool fullscreen =
         m_compositorBridge->monitorHasFullscreenWindow(instance->screen->name());
 
+    if (qEnvironmentVariableIntValue("PSD_COMPOSITOR_DIAGNOSTICS") == 1) {
+        qInfo().noquote()
+            << "PSD_COMPOSITOR_DIAG fullscreen-decision"
+            << instance->screen->name()
+            << "fullscreen=" << fullscreen
+            << "eventStreamConnected=" << m_compositorBridge->eventStreamConnected()
+            << "monitorCount=" << m_compositorBridge->monitors().size()
+            << "workspaceCount=" << m_compositorBridge->workspaces().size()
+            << "windowCount=" << m_compositorBridge->windows().size();
+    }
+
     if (instance->fullscreenStateInitialized
         && instance->fullscreenSuppressed == fullscreen
         && (fullscreen

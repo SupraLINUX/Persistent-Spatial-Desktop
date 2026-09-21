@@ -267,6 +267,7 @@ print(focused["name"])
 PY
 )"
 
+PSD_COMPOSITOR_DIAGNOSTICS="${PSD_PROBE_COMPOSITOR_DIAGNOSTICS:-0}" \
 PSD_EXPERIMENTAL_HYPRLAND_SYNC=1 "$SHELL_PATH" >"$log_file" 2>&1 &
 shell_pid=$!
 
@@ -714,6 +715,7 @@ PY
 
         hyprctl dispatch movecursor "$runtime_center_x $runtime_center_y" | grep -qx "ok"
 
+        PSD_COMPOSITOR_DIAGNOSTICS="${PSD_PROBE_COMPOSITOR_DIAGNOSTICS:-0}" \
         PSD_EXPERIMENTAL_HYPRLAND_SYNC=1 "$SHELL_PATH" >>"$log_file" 2>&1 &
         shell_pid=$!
 
@@ -850,6 +852,8 @@ PY
         if [[ "$fullscreen_ready" != "1" ]]; then
             echo "PSD live probe: fullscreen did not suppress shell/reset transform on $primary_monitor." >&2
             hyprctl -j clients >&2 || true
+            hyprctl -j monitors >&2 || true
+            hyprctl -j workspaces >&2 || true
             hyprctl -j layers >&2 || true
             plugin_state >&2 || true
             cat "$log_file" >&2 || true
