@@ -165,7 +165,7 @@ The probe:
 - validates protocol v3 capabilities plus the experimental diagnostic-state capability;
 - requires the plugin transform state to be clean before starting;
 - launches `psd-shell` with experimental compositor sync enabled;
-- verifies exactly one `psd-shell:<output>` layer surface for every active Hyprland monitor;
+- verifies exactly one live `psd-shell:<output>` layer surface for every active Hyprland monitor; Hyprland `j/layers` entries with `pid=-1` are treated as closed/fading surfaces rather than active shell instances;
 - verifies the shell starts in CENTER with every `psd-return-shield:<output>` surface unmapped;
 - verifies the four-finger gesture arm/disarm dispatcher;
 - cleans up the shell and experimental gesture interception on exit;

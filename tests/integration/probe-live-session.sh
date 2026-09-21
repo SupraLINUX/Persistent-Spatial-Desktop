@@ -53,7 +53,7 @@ if [[ -n "$test_client_path" ]]; then
     fi
 fi
 
-existing_psd_layer="$(hyprctl -j layers | python3 -c 'import json,sys; d=json.load(sys.stdin); print(any(str(x.get("namespace","")).startswith(("psd-shell:","psd-return-shield:","psd-gutter:")) for m in d.values() for level in m.get("levels",{}).values() for x in level))')"
+existing_psd_layer="$(hyprctl -j layers | python3 -c 'import json,sys; d=json.load(sys.stdin); print(any(str(x.get("namespace","")).startswith(("psd-shell:","psd-return-shield:","psd-gutter:")) for m in d.values() for level in m.get("levels",{}).values() for x in level if x.get("pid",0) != -1))')"
 if [[ "$existing_psd_layer" == "True" ]]; then
     echo "PSD live probe: a PSD shell/return-shield layer is already mapped; refusing to create a duplicate." >&2
     exit 1
@@ -139,6 +139,8 @@ if any(m.get("name") == name for m in monitors):
 for monitor_layers in layers.values():
     for level in monitor_layers.get("levels", {}).values():
         for layer in level:
+            if layer.get("pid", 0) == -1:
+                continue
             if layer.get("namespace") == f"psd-shell:{name}":
                 raise SystemExit(1)
 PY
@@ -267,7 +269,6 @@ print(focused["name"])
 PY
 )"
 
-PSD_COMPOSITOR_DIAGNOSTICS="${PSD_PROBE_COMPOSITOR_DIAGNOSTICS:-0}" \
 PSD_EXPERIMENTAL_HYPRLAND_SYNC=1 "$SHELL_PATH" >"$log_file" 2>&1 &
 shell_pid=$!
 
@@ -304,6 +305,7 @@ for monitor in monitors:
         layer.get("namespace", "")
         for level in monitor_layers.values()
         for layer in level
+        if layer.get("pid", 0) != -1
     ]
 
     if namespaces.count(expected_shell) != 1:
@@ -362,6 +364,7 @@ namespaces = [
     layer.get("namespace", "")
     for level in layers.get(name, {}).get("levels", {}).values()
     for layer in level
+    if layer.get("pid", 0) != -1
 ]
 if namespaces.count(f"psd-shell:{name}") != 1:
     raise SystemExit(1)
@@ -571,6 +574,7 @@ namespaces = {
     layer.get("namespace", "")
     for level in layers.get(monitor, {}).get("levels", {}).values()
     for layer in level
+    if layer.get("pid", 0) != -1
 }
 if f"psd-return-shield:{monitor}" not in namespaces:
     raise SystemExit(1)
@@ -715,7 +719,6 @@ PY
 
         hyprctl dispatch movecursor "$runtime_center_x $runtime_center_y" | grep -qx "ok"
 
-        PSD_COMPOSITOR_DIAGNOSTICS="${PSD_PROBE_COMPOSITOR_DIAGNOSTICS:-0}" \
         PSD_EXPERIMENTAL_HYPRLAND_SYNC=1 "$SHELL_PATH" >>"$log_file" 2>&1 &
         shell_pid=$!
 
@@ -745,6 +748,7 @@ for monitor in monitors:
         layer.get("namespace", "")
         for level in layers.get(name, {}).get("levels", {}).values()
         for layer in level
+        if layer.get("pid", 0) != -1
     ]
     if namespaces.count(f"psd-shell:{name}") != 1:
         raise SystemExit(1)
@@ -832,6 +836,7 @@ namespaces = {
     layer.get("namespace", "")
     for level in layers.get(monitor, {}).get("levels", {}).values()
     for layer in level
+    if layer.get("pid", 0) != -1
 }
 if f"psd-shell:{monitor}" in namespaces or f"psd-return-shield:{monitor}" in namespaces:
     raise SystemExit(1)
@@ -889,6 +894,7 @@ namespaces = [
     layer.get("namespace", "")
     for level in layers.get(monitor, {}).get("levels", {}).values()
     for layer in level
+    if layer.get("pid", 0) != -1
 ]
 if namespaces.count(f"psd-shell:{monitor}") != 1:
     raise SystemExit(1)
@@ -989,6 +995,7 @@ namespaces = {
     layer.get("namespace", "")
     for level in layers.get(monitor, {}).get("levels", {}).values()
     for layer in level
+    if layer.get("pid", 0) != -1
 }
 matches = [x for x in state.get("trackedTransforms", []) if x.get("monitor") == monitor]
 
@@ -1042,6 +1049,7 @@ for monitor in monitors:
         layer.get("namespace", "")
         for level in layers.get(name, {}).get("levels", {}).values()
         for layer in level
+        if layer.get("pid", 0) != -1
     ]
     if namespaces.count(f"psd-shell:{name}") != 1:
         raise SystemExit(1)
@@ -1120,6 +1128,7 @@ namespaces = {
     layer.get("namespace", "")
     for level in layers.get(monitor, {}).get("levels", {}).values()
     for layer in level
+    if layer.get("pid", 0) != -1
 }
 matches = [x for x in state.get("trackedTransforms", []) if x.get("monitor") == monitor]
 

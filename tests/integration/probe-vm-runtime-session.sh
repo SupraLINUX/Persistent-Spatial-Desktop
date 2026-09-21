@@ -170,7 +170,6 @@ fi
 bash "$(dirname "$0")/probe-vm-render-transform.sh" "$test_client_path" "$PLUGIN_PATH"
 
 PSD_PROBE_TEST_CLIENT="$test_client_path" \
-PSD_PROBE_COMPOSITOR_DIAGNOSTICS=1 \
 PSD_PROBE_EXERCISE_HOTPLUG=1 \
 PSD_PROBE_EXERCISE_CRASH_RECOVERY=1 \
 PSD_PROBE_EXERCISE_PLUGIN_LIFECYCLE=1 \
