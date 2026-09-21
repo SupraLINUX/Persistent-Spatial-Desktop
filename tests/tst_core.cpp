@@ -54,10 +54,14 @@ public:
     void start() override {}
     void refreshAll() override {}
 
-    void inject(const QVariantList &monitors, const QVariantList &windows)
+    void inject(
+        const QVariantList &monitors,
+        const QVariantList &windows,
+        const QVariantList &workspaces = {})
     {
         setMonitors(monitors);
         setWindows(windows);
+        setWorkspaces(workspaces);
     }
 
     void notifyMonitorsChanged()
@@ -616,6 +620,7 @@ void CoreTest::hyprlandWorkspaceParsing()
     const QVariantMap workspace = workspaces.first().toMap();
     QCOMPARE(workspace.value(QStringLiteral("monitor")).toString(), QStringLiteral("DP-1"));
     QCOMPARE(workspace.value(QStringLiteral("windows")).toInt(), 2);
+    QVERIFY(!workspace.value(QStringLiteral("hasFullscreen")).toBool());
 }
 
 void CoreTest::hyprlandWindowParsing()
@@ -696,6 +701,39 @@ void CoreTest::compositorFullscreenDetectionUsesActiveWorkspace()
     window.insert(QStringLiteral("mapped"), true);
     window.insert(QStringLiteral("fullscreen"), 0);
     bridge.inject(QVariantList{monitor}, QVariantList{window});
+    QVERIFY(!bridge.monitorHasFullscreenWindow(QStringLiteral("DP-1")));
+
+    QVariantMap activeWorkspace{
+        {QStringLiteral("id"), 3},
+        {QStringLiteral("name"), QStringLiteral("3")},
+        {QStringLiteral("monitorId"), 0},
+        {QStringLiteral("hasFullscreen"), true},
+    };
+
+    // Workspace aggregate state must suppress even if the client snapshot is
+    // still pre-fullscreen.
+    bridge.inject(
+        QVariantList{monitor},
+        QVariantList{window},
+        QVariantList{activeWorkspace});
+    QVERIFY(bridge.monitorHasFullscreenWindow(QStringLiteral("DP-1")));
+
+    activeWorkspace.insert(QStringLiteral("hasFullscreen"), false);
+    window.insert(QStringLiteral("fullscreen"), 2);
+    bridge.inject(
+        QVariantList{monitor},
+        QVariantList{window},
+        QVariantList{activeWorkspace});
+    QVERIFY(bridge.monitorHasFullscreenWindow(QStringLiteral("DP-1")));
+
+    QVariantMap inactiveWorkspace = activeWorkspace;
+    inactiveWorkspace.insert(QStringLiteral("id"), 4);
+    inactiveWorkspace.insert(QStringLiteral("hasFullscreen"), true);
+    window.insert(QStringLiteral("fullscreen"), 0);
+    bridge.inject(
+        QVariantList{monitor},
+        QVariantList{window},
+        QVariantList{inactiveWorkspace});
     QVERIFY(!bridge.monitorHasFullscreenWindow(QStringLiteral("DP-1")));
 
     QVERIFY(!bridge.monitorHasFullscreenWindow(QStringLiteral("HDMI-A-1")));

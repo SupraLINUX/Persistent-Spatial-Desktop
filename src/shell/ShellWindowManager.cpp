@@ -64,6 +64,8 @@ ShellWindowManager::ShellWindowManager(
 
     connect(m_compositorBridge, &CompositorBridge::monitorsChanged,
             this, &ShellWindowManager::updateAllFullscreenStates);
+    connect(m_compositorBridge, &CompositorBridge::workspacesChanged,
+            this, &ShellWindowManager::updateAllFullscreenStates);
     connect(m_compositorBridge, &CompositorBridge::windowsChanged,
             this, &ShellWindowManager::updateAllFullscreenStates);
 }

@@ -328,12 +328,29 @@ void HyprlandIpcBridge::handleEventLine(const QByteArray &line)
         return;
     }
 
+    if (event.name == QStringLiteral("fullscreen")) {
+        // Hyprland's event can race the final IPC snapshot during fullscreen
+        // transitions. Refresh both representations immediately, then perform
+        // one trailing event-driven reconciliation. This is not polling.
+        scheduleRefresh(RefreshWindows | RefreshWorkspaces);
+        QTimer::singleShot(120, this, [this] {
+            if (available())
+                scheduleRefresh(RefreshWindows | RefreshWorkspaces);
+        });
+        return;
+    }
+
+    if (event.name.startsWith(QStringLiteral("closewindow"))
+        || event.name.startsWith(QStringLiteral("movewindow"))) {
+        // Closing/moving a fullscreen target can change workspace aggregate
+        // state even if no useful client remains to describe it.
+        scheduleRefresh(RefreshWindows | RefreshWorkspaces);
+        return;
+    }
+
     if (event.name.startsWith(QStringLiteral("openwindow"))
-        || event.name.startsWith(QStringLiteral("closewindow"))
-        || event.name.startsWith(QStringLiteral("movewindow"))
         || event.name.startsWith(QStringLiteral("activewindow"))
         || event.name.startsWith(QStringLiteral("windowtitle"))
-        || event.name == QStringLiteral("fullscreen")
         || event.name == QStringLiteral("changefloatingmode")
         || event.name == QStringLiteral("pin")
         || event.name == QStringLiteral("minimized")) {

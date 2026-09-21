@@ -65,6 +65,27 @@ bool CompositorBridge::monitorHasFullscreenWindow(const QString &monitorName) co
     const qlonglong wantedMonitor = monitorId.toLongLong();
     const qlonglong wantedWorkspace = activeWorkspaceId.toLongLong();
 
+    // Hyprland exposes fullscreen state both on workspaces and clients. Prefer
+    // the active workspace's aggregate flag because it remains meaningful
+    // across fullscreen target replacement/teardown; keep the client scan as a
+    // fallback for snapshots where workspace state has not caught up yet.
+    for (const QVariant &value : m_workspaces) {
+        const QVariantMap workspace = value.toMap();
+        if (workspace.value(QStringLiteral("id")).toLongLong() != wantedWorkspace)
+            continue;
+
+        const QVariant workspaceMonitorId = workspace.value(QStringLiteral("monitorId"));
+        if (workspaceMonitorId.isValid()
+            && workspaceMonitorId.toLongLong() != wantedMonitor) {
+            continue;
+        }
+
+        if (workspace.value(QStringLiteral("hasFullscreen")).toBool())
+            return true;
+
+        break;
+    }
+
     for (const QVariant &value : m_windows) {
         const QVariantMap window = value.toMap();
         if (!window.value(QStringLiteral("mapped"), true).toBool())

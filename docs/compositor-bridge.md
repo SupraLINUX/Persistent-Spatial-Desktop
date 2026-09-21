@@ -32,7 +32,7 @@ The shell does not expose raw Hyprland JSON as its internal model. `HyprlandProt
 
 ## Event model
 
-The event socket remains connected and drives targeted state refreshes.
+The event socket remains connected and drives targeted state refreshes. Fullscreen state is reconciled from both the active workspace aggregate (`j/workspaces.hasfullscreen`) and client fullscreen mode (`j/clients.fullscreen`). A fullscreen event performs an immediate coalesced refresh plus one delayed one-shot reconciliation to avoid observing Hyprland mid-transition; this is event-driven and is not a polling loop.
 
 Examples:
 
