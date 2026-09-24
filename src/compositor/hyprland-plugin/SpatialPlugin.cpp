@@ -50,12 +50,26 @@ struct NativeWorkspaceAnimationConflict
     Vector2D requestedOffset;
 };
 
+using RenderWindowHookFn = void (*)(
+    CHyprRenderer *,
+    PHLWINDOW,
+    PHLMONITOR,
+    const Time::steady_tp &,
+    bool,
+    eRenderPassMode,
+    bool,
+    bool);
+
 HANDLE g_handle = nullptr;
 SP<SHyprCtlCommand> g_capabilitiesCommand;
 SP<SHyprCtlCommand> g_stateCommand;
 SP<HOOK_CALLBACK_FN> g_swipeBeginCallback;
 SP<HOOK_CALLBACK_FN> g_swipeUpdateCallback;
 SP<HOOK_CALLBACK_FN> g_swipeEndCallback;
+CFunctionHook *g_renderWindowHook = nullptr;
+RenderWindowHookFn g_originalRenderWindow = nullptr;
+bool g_dedicatedPresentationAvailable = false;
+std::unordered_map<std::string, Vector2D> g_dedicatedMonitorOffsets;
 std::vector<PHLWORKSPACEREF> g_touchedWorkspaces;
 std::unordered_map<std::string, MonitorTransformState> g_monitorTransforms;
 
@@ -66,6 +80,202 @@ uint64_t g_nextWorkspaceGeneration = 1;
 uint64_t g_workspaceSwitchResetCount = 0;
 uint64_t g_nativeWorkspaceAnimationConflictCount = 0;
 NativeWorkspaceAnimationConflict g_lastNativeWorkspaceAnimationConflict;
+
+Vector2D dedicatedOffsetForMonitor(const PHLMONITOR &monitor)
+{
+    if (!monitor)
+        return {};
+
+    const auto it = g_dedicatedMonitorOffsets.find(monitor->m_name);
+    if (it == g_dedicatedMonitorOffsets.end())
+        return {};
+
+    return it->second;
+}
+
+void renderWindowWithDedicatedOffset(
+    CHyprRenderer *renderer,
+    PHLWINDOW window,
+    PHLMONITOR monitor,
+    const Time::steady_tp &time,
+    bool decorate,
+    eRenderPassMode mode,
+    bool ignorePosition,
+    bool standalone)
+{
+    if (!g_originalRenderWindow)
+        return;
+
+    const Vector2D psdOffset =
+        (!standalone && window && monitor)
+        ? dedicatedOffsetForMonitor(monitor)
+        : Vector2D{};
+
+    if (psdOffset == Vector2D{}) {
+        g_originalRenderWindow(
+            renderer,
+            window,
+            monitor,
+            time,
+            decorate,
+            mode,
+            ignorePosition,
+            standalone);
+        return;
+    }
+
+    // Presentation-only composition: preserve Hyprland's own floating
+    // correction and add PSD only for the duration of this render call.
+    // No logical geometry, workspace animation state or persistent window
+    // state is changed.
+    const Vector2D nativeFloatingOffset = window->m_floatingOffset;
+    window->m_floatingOffset = nativeFloatingOffset + psdOffset;
+
+    g_originalRenderWindow(
+        renderer,
+        window,
+        monitor,
+        time,
+        decorate,
+        mode,
+        ignorePosition,
+        standalone);
+
+    window->m_floatingOffset = nativeFloatingOffset;
+}
+
+bool installDedicatedPresentationHook()
+{
+    const auto matches =
+        HyprlandAPI::findFunctionsByName(g_handle, "renderWindow");
+
+    const auto it = std::ranges::find_if(
+        matches,
+        [](const SFunctionMatch &match) {
+            return match.demangled.contains("CHyprRenderer::renderWindow(");
+        });
+
+    if (it == matches.end())
+        return false;
+
+    const auto duplicate = std::ranges::find_if(
+        std::next(it),
+        matches.end(),
+        [](const SFunctionMatch &match) {
+            return match.demangled.contains("CHyprRenderer::renderWindow(");
+        });
+
+    if (duplicate != matches.end())
+        return false;
+
+    g_renderWindowHook = HyprlandAPI::createFunctionHook(
+        g_handle,
+        it->address,
+        reinterpret_cast<const void *>(&renderWindowWithDedicatedOffset));
+
+    if (!g_renderWindowHook || !g_renderWindowHook->hook()) {
+        if (g_renderWindowHook)
+            HyprlandAPI::removeFunctionHook(g_handle, g_renderWindowHook);
+        g_renderWindowHook = nullptr;
+        return false;
+    }
+
+    g_originalRenderWindow =
+        reinterpret_cast<RenderWindowHookFn>(g_renderWindowHook->m_original);
+
+    if (!g_originalRenderWindow) {
+        HyprlandAPI::removeFunctionHook(g_handle, g_renderWindowHook);
+        g_renderWindowHook = nullptr;
+        return false;
+    }
+
+    return true;
+}
+
+void damageDedicatedMonitor(const std::string &monitorName)
+{
+    const auto monitor = g_pCompositor->getMonitorFromName(monitorName);
+    if (monitor)
+        g_pHyprRenderer->damageMonitor(monitor);
+}
+
+SDispatchResult setDedicatedPresentationOffset(std::string arguments)
+{
+    if (!g_dedicatedPresentationAvailable)
+        return {
+            .success = false,
+            .error = "PSD: dedicated presentation offset hook unavailable",
+        };
+
+    std::replace(arguments.begin(), arguments.end(), ',', ' ');
+
+    std::istringstream stream(arguments);
+    std::string monitorName;
+    double x = 0.0;
+    double y = 0.0;
+    std::string trailing;
+
+    if (!(stream >> monitorName >> x >> y) || (stream >> trailing))
+        return {.success = false, .error = "PSD: expected <monitor> <x> <y>"};
+
+    if (!std::isfinite(x) || !std::isfinite(y))
+        return {.success = false, .error = "PSD: offset coordinates must be finite"};
+
+    const auto monitor = g_pCompositor->getMonitorFromName(monitorName);
+    if (!monitor)
+        return {.success = false, .error = "PSD: unknown monitor " + monitorName};
+
+    const auto workspace = monitor->m_activeWorkspace;
+    if (!workspace)
+        return {.success = false, .error = "PSD: monitor has no active workspace"};
+
+    if (workspace->m_hasFullscreenWindow)
+        return {
+            .success = false,
+            .error = "PSD: refusing dedicated presentation offset while fullscreen content is active",
+        };
+
+    const Vector2D offset{x, y};
+    if (offset == Vector2D{})
+        g_dedicatedMonitorOffsets.erase(monitorName);
+    else
+        g_dedicatedMonitorOffsets[monitorName] = offset;
+
+    g_pHyprRenderer->damageMonitor(monitor);
+    return {};
+}
+
+SDispatchResult resetDedicatedPresentationOffset(std::string arguments)
+{
+    std::istringstream stream(arguments);
+    std::string monitorName;
+    std::string trailing;
+
+    if (!(stream >> monitorName) || (stream >> trailing))
+        return {.success = false, .error = "PSD: expected <monitor>"};
+
+    const bool erased = g_dedicatedMonitorOffsets.erase(monitorName) > 0;
+    if (erased)
+        damageDedicatedMonitor(monitorName);
+
+    return {};
+}
+
+void clearDedicatedPresentationOffsets()
+{
+    std::vector<std::string> monitors;
+    monitors.reserve(g_dedicatedMonitorOffsets.size());
+
+    for (const auto &[monitorName, offset] : g_dedicatedMonitorOffsets) {
+        (void)offset;
+        monitors.push_back(monitorName);
+    }
+
+    g_dedicatedMonitorOffsets.clear();
+
+    for (const std::string &monitorName : monitors)
+        damageDedicatedMonitor(monitorName);
+}
 
 std::string jsonEscape(const std::string &value)
 {
@@ -426,10 +636,14 @@ void onSwipeEnd(void *, SCallbackInfo &info, std::any parameter)
 std::string capabilitiesResponse(eHyprCtlOutputFormat format, std::string)
 {
     if (format == FORMAT_JSON) {
-        return R"json({"protocolVersion":3,"pluginVersion":"0.1.4","spatialRenderOffsetExperimental":true,"monitorTargeting":true,"fourFingerGestureEventsExperimental":true,"gestureEventsDefaultEnabled":false,"diagnosticStateQueryExperimental":true,"lifecycleEventsExperimental":true,"rigidFloatingNormalizationExperimental":true,"pinnedPresentationOffsetExperimental":true,"nativeWorkspaceAnimationDiagnosticsExperimental":true})json";
+        return std::format(
+            R"json({{"protocolVersion":3,"pluginVersion":"0.1.5","spatialRenderOffsetExperimental":true,"monitorTargeting":true,"fourFingerGestureEventsExperimental":true,"gestureEventsDefaultEnabled":false,"diagnosticStateQueryExperimental":true,"lifecycleEventsExperimental":true,"rigidFloatingNormalizationExperimental":true,"pinnedPresentationOffsetExperimental":true,"nativeWorkspaceAnimationDiagnosticsExperimental":true,"dedicatedPresentationOffsetExperimental":{}}})json",
+            g_dedicatedPresentationAvailable ? "true" : "false");
     }
 
-    return "protocolVersion=3 pluginVersion=0.1.4 spatialRenderOffsetExperimental=true monitorTargeting=true fourFingerGestureEventsExperimental=true gestureEventsDefaultEnabled=false diagnosticStateQueryExperimental=true lifecycleEventsExperimental=true rigidFloatingNormalizationExperimental=true pinnedPresentationOffsetExperimental=true nativeWorkspaceAnimationDiagnosticsExperimental=true";
+    return std::format(
+        "protocolVersion=3 pluginVersion=0.1.5 spatialRenderOffsetExperimental=true monitorTargeting=true fourFingerGestureEventsExperimental=true gestureEventsDefaultEnabled=false diagnosticStateQueryExperimental=true lifecycleEventsExperimental=true rigidFloatingNormalizationExperimental=true pinnedPresentationOffsetExperimental=true nativeWorkspaceAnimationDiagnosticsExperimental=true dedicatedPresentationOffsetExperimental={}",
+        g_dedicatedPresentationAvailable ? "true" : "false");
 }
 
 std::string stateResponse(eHyprCtlOutputFormat format, std::string)
@@ -517,6 +731,21 @@ std::string stateResponse(eHyprCtlOutputFormat format, std::string)
         }
     }
 
+    std::string dedicatedPresentationOffsets;
+    first = true;
+
+    for (const auto &[monitorName, offset] : g_dedicatedMonitorOffsets) {
+        if (!first)
+            dedicatedPresentationOffsets += ',';
+        first = false;
+
+        dedicatedPresentationOffsets += std::format(
+            R"json({{"monitor":"{}","x":{:.6f},"y":{:.6f}}})json",
+            jsonEscape(monitorName),
+            offset.x,
+            offset.y);
+    }
+
     std::string activeWorkspaceAnimations;
     first = true;
 
@@ -561,7 +790,7 @@ std::string stateResponse(eHyprCtlOutputFormat format, std::string)
     }
 
     return std::format(
-        R"json({{"trackedTransforms":[{}],"touchedWorkspaceCount":{},"trackedPresentationWindowCount":{},"presentationOffsets":[{}],"workspaceSwitchResetCount":{},"activeWorkspaceAnimations":[{}],"nativeWorkspaceAnimationConflictCount":{},"lastNativeWorkspaceAnimationConflict":{},"gestureEventsEnabled":{},"gestureActive":{}}})json",
+        R"json({{"trackedTransforms":[{}],"touchedWorkspaceCount":{},"trackedPresentationWindowCount":{},"presentationOffsets":[{}],"workspaceSwitchResetCount":{},"dedicatedPresentationOffsets":[{}],"activeWorkspaceAnimations":[{}],"nativeWorkspaceAnimationConflictCount":{},"lastNativeWorkspaceAnimationConflict":{},"gestureEventsEnabled":{},"gestureActive":{}}})json",
         transforms,
         g_touchedWorkspaces.size(),
         std::accumulate(
@@ -573,6 +802,7 @@ std::string stateResponse(eHyprCtlOutputFormat format, std::string)
             }),
         presentationOffsets,
         g_workspaceSwitchResetCount,
+        dedicatedPresentationOffsets,
         activeWorkspaceAnimations,
         g_nativeWorkspaceAnimationConflictCount,
         lastNativeConflict,
@@ -613,11 +843,17 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle)
     if (serverHash != clientHash)
         throw std::runtime_error("PSD Hyprland plugin ABI mismatch");
 
+    g_dedicatedPresentationAvailable = installDedicatedPresentationHook();
+
     bool success = true;
     success = success && HyprlandAPI::addDispatcherV2(
         g_handle, "plugin:psd:offset", setOffset);
     success = success && HyprlandAPI::addDispatcherV2(
         g_handle, "plugin:psd:reset", resetOffset);
+    success = success && HyprlandAPI::addDispatcherV2(
+        g_handle, "plugin:psd:presentation-offset", setDedicatedPresentationOffset);
+    success = success && HyprlandAPI::addDispatcherV2(
+        g_handle, "plugin:psd:presentation-reset", resetDedicatedPresentationOffset);
     success = success && HyprlandAPI::addDispatcherV2(
         g_handle, "plugin:psd:gesture-events", setGestureEvents);
 
@@ -660,7 +896,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle)
         "psd-hyprland-plugin",
         "Persistent Spatial Desktop compositor integration experiment",
         "SupraLINUX",
-        "0.1.4",
+        "0.1.5",
     };
 }
 
@@ -670,6 +906,14 @@ APICALL EXPORT void PLUGIN_EXIT()
     finishSpatialGesture(true, 0);
     postGestureEvent("psdpluginunloading", "3");
     resetTouchedWorkspaces();
+    clearDedicatedPresentationOffsets();
+
+    if (g_renderWindowHook) {
+        HyprlandAPI::removeFunctionHook(g_handle, g_renderWindowHook);
+        g_renderWindowHook = nullptr;
+    }
+    g_originalRenderWindow = nullptr;
+    g_dedicatedPresentationAvailable = false;
 
     g_swipeBeginCallback.reset();
     g_swipeUpdateCallback.reset();
@@ -682,6 +926,8 @@ APICALL EXPORT void PLUGIN_EXIT()
             HyprlandAPI::unregisterHyprCtlCommand(g_handle, g_stateCommand);
         HyprlandAPI::removeDispatcher(g_handle, "plugin:psd:offset");
         HyprlandAPI::removeDispatcher(g_handle, "plugin:psd:reset");
+        HyprlandAPI::removeDispatcher(g_handle, "plugin:psd:presentation-offset");
+        HyprlandAPI::removeDispatcher(g_handle, "plugin:psd:presentation-reset");
         HyprlandAPI::removeDispatcher(g_handle, "plugin:psd:gesture-events");
     }
 

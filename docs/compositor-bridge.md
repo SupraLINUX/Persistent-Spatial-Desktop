@@ -173,3 +173,44 @@ production-safe coexistence mechanism for simultaneous PSD displacement and
 native Hyprland workspace animation. The eventual runtime policy must either
 serialize/cancel one motion domain or move PSD to a dedicated compositor-side
 transform that does not reuse Hyprland's workspace-animation variable.
+
+
+### Dedicated PSD presentation-offset POC
+
+A second experimental transform backend is now implemented side-by-side with
+the legacy `m_renderOffset` proof of concept. It does **not** replace the
+runtime contract yet.
+
+On Hyprland 0.53.3 the plugin resolves and hooks
+`CHyprRenderer::renderWindow()` through Hyprland's function-hook API. PSD owns
+a monitor-scoped `Vector2D` offset. During a normal window render call, the
+hook temporarily composes that vector with Hyprland's already-computed
+`CWindow::m_floatingOffset`, invokes the original renderer, and immediately
+restores the native value.
+
+Consequences of the experiment:
+
+- PSD no longer writes `CWorkspace::m_renderOffset` in the dedicated path;
+- Hyprland retains ownership of workspace animations;
+- Hyprland's existing floating correction is preserved and composed rather than
+  neutralized;
+- tiled, floating and pinned windows share the same monitor-scoped PSD vector;
+- popups/subsurfaces produced inside the same `renderWindow()` call inherit the
+  composed render position;
+- logical client geometry remains untouched;
+- layer-shell PSD surfaces are not transformed by this hook.
+
+The hook is intentionally marked experimental. Hyprland explicitly states that
+internal function hooks have no API-stability guarantee. The production goal is
+to validate the transform semantics with this POC, then either use a stable
+upstream extension point when available or propose a small generic presentation
+transform extension upstream.
+
+The dedicated backend uses separate experimental dispatchers:
+
+- `plugin:psd:presentation-offset <monitor> <x> <y>`;
+- `plugin:psd:presentation-reset <monitor>`.
+
+The legacy commands remain available only as a comparison baseline until the
+dedicated backend passes the complete validation suite and the runtime is
+migrated.

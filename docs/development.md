@@ -97,7 +97,8 @@ It then connects to Hyprland's documented command and event UNIX sockets.
 - GitHub-hosted Ubuntu 26.04 KVM/QEMU integration with guest DRM/KMS, seatd, Hyprland, the real Qt/Wayland shell and compositor plugin;
 - deterministic Qt/Wayland integration client used to keep workspaces alive, request fullscreen and paint exact solid colors for pixel-level compositor validation;
 - QEMU pixel-evidence probe using `grim` + Pillow to distinguish compositor render translation from logical window geometry for tiled, floating and pinned windows;
-- QEMU native-workspace-animation characterization that detects whether a PSD command collides with Hyprland's own in-flight `m_renderOffset` animation before either mechanism is promoted to production.
+- QEMU native-workspace-animation characterization that proves the legacy `m_renderOffset` collision and independently verifies that the dedicated PSD presentation-offset POC can remain active while Hyprland's native workspace animation runs and settles;
+- side-by-side screenshot evidence for legacy and dedicated transform backends before runtime migration.
 
 ## Current compositor boundary
 

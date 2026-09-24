@@ -62,6 +62,7 @@ cleanup() {
 
     hyprctl keyword animations:enabled false >/dev/null 2>&1 || true
     hyprctl dispatch plugin:psd:reset "$monitor_name" >/dev/null 2>&1 || true
+    hyprctl dispatch plugin:psd:presentation-reset "$monitor_name" >/dev/null 2>&1 || true
 
     for pid in "${client_pids[@]}"; do
         [[ -n "$pid" ]] || continue
@@ -117,6 +118,7 @@ import sys
 data = json.loads(sys.argv[1])
 assert data["protocolVersion"] == 3, data
 assert data["nativeWorkspaceAnimationDiagnosticsExperimental"] is True, data
+assert data["dedicatedPresentationOffsetExperimental"] is True, data
 print("PSD workspace-animation probe: diagnostic capability PASS")
 PY
 
@@ -293,6 +295,120 @@ print(
 PY
 
 hyprctl dispatch plugin:psd:reset "$monitor_name" | grep -qx "ok"
+
+# Dedicated backend: the PSD monitor offset must remain independent while
+# Hyprland owns and animates the incoming workspace m_renderOffset.
+hyprctl keyword animations:enabled false | grep -qx "ok"
+hyprctl dispatch workspace "$workspace_a" | grep -qx "ok"
+hyprctl dispatch plugin:psd:presentation-reset "$monitor_name" | grep -qx "ok"
+
+dedicated_before_state="$(hyprctl -j psd-plugin-state)"
+dedicated_before_conflicts="$(python3 - "$dedicated_before_state" <<'PY'
+import json
+import sys
+print(json.loads(sys.argv[1]).get("nativeWorkspaceAnimationConflictCount", 0))
+PY
+)"
+
+hyprctl dispatch plugin:psd:presentation-offset "$monitor_name 96 0" | grep -qx "ok"
+hyprctl keyword animations:enabled true | grep -qx "ok"
+hyprctl dispatch workspace "$workspace_b" | grep -qx "ok"
+
+coexistence_seen=0
+for _ in $(seq 1 40); do
+    state="$(hyprctl -j psd-plugin-state)"
+    if python3 - "$state" "$monitor_name" "$workspace_b" "$dedicated_before_conflicts" <<'PY' >/dev/null 2>&1
+import json
+import sys
+
+state=json.loads(sys.argv[1])
+monitor=sys.argv[2]
+workspace=sys.argv[3]
+before=int(sys.argv[4])
+
+native=[
+    x for x in state.get("activeWorkspaceAnimations", [])
+    if x.get("monitor")==monitor and str(x.get("workspace",""))==workspace
+]
+dedicated=[
+    x for x in state.get("dedicatedPresentationOffsets", [])
+    if x.get("monitor")==monitor
+]
+
+if len(native)!=1 or native[0].get("animated") is not True:
+    raise SystemExit(1)
+if abs(float(native[0].get("actualX",0))) < 1.0 and abs(float(native[0].get("actualY",0))) < 1.0:
+    raise SystemExit(1)
+if len(dedicated)!=1:
+    raise SystemExit(1)
+if abs(float(dedicated[0].get("x",0))-96.0) > 0.01 or abs(float(dedicated[0].get("y",0))) > 0.01:
+    raise SystemExit(1)
+if int(state.get("nativeWorkspaceAnimationConflictCount",0)) != before:
+    raise SystemExit(1)
+PY
+    then
+        coexistence_seen=1
+        break
+    fi
+    sleep 0.025
+done
+
+if [[ "$coexistence_seen" != "1" ]]; then
+    echo "PSD workspace-animation probe: dedicated offset did not coexist with native animation." >&2
+    hyprctl -j psd-plugin-state >&2 || true
+    exit 1
+fi
+
+echo "PSD workspace-animation probe: native animation + dedicated PSD offset simultaneous PASS"
+
+dedicated_settled=0
+for _ in $(seq 1 120); do
+    state="$(hyprctl -j psd-plugin-state)"
+    if python3 - "$state" "$monitor_name" "$workspace_b" "$dedicated_before_conflicts" <<'PY' >/dev/null 2>&1
+import json
+import sys
+
+state=json.loads(sys.argv[1])
+monitor=sys.argv[2]
+workspace=sys.argv[3]
+before=int(sys.argv[4])
+
+native=[
+    x for x in state.get("activeWorkspaceAnimations", [])
+    if x.get("monitor")==monitor and str(x.get("workspace",""))==workspace
+]
+dedicated=[
+    x for x in state.get("dedicatedPresentationOffsets", [])
+    if x.get("monitor")==monitor
+]
+
+if len(native)!=1:
+    raise SystemExit(1)
+if native[0].get("animated") is True:
+    raise SystemExit(1)
+if abs(float(native[0].get("actualX",0))) > 0.5 or abs(float(native[0].get("actualY",0))) > 0.5:
+    raise SystemExit(1)
+if len(dedicated)!=1 or abs(float(dedicated[0].get("x",0))-96.0) > 0.01:
+    raise SystemExit(1)
+if int(state.get("nativeWorkspaceAnimationConflictCount",0)) != before:
+    raise SystemExit(1)
+PY
+    then
+        dedicated_settled=1
+        break
+    fi
+    sleep 0.05
+done
+
+if [[ "$dedicated_settled" != "1" ]]; then
+    echo "PSD workspace-animation probe: dedicated offset was not preserved after native settle." >&2
+    hyprctl -j psd-plugin-state >&2 || true
+    exit 1
+fi
+
+echo "PSD workspace-animation probe: native animation settles while dedicated PSD offset persists PASS"
+
+hyprctl dispatch plugin:psd:presentation-reset "$monitor_name" | grep -qx "ok"
 hyprctl keyword animations:enabled false | grep -qx "ok"
 
-echo "PSD workspace-animation probe: characterization PASS (collision confirmed)"
+echo "PSD workspace-animation probe: characterization PASS (legacy collision confirmed, dedicated coexistence confirmed)"

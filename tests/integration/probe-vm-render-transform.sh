@@ -3,6 +3,7 @@ set -euo pipefail
 
 CLIENT_PATH="${1:-build/tests/psd-integration-client}"
 PLUGIN_PATH="${2:-build-hypr/src/compositor/hyprland-plugin/psd-hyprland-plugin.so}"
+RENDER_BACKEND="${PSD_RENDER_PROBE_BACKEND:-legacy}"
 
 for command in grim hyprctl python3 realpath; do
     if ! command -v "$command" >/dev/null 2>&1; then
@@ -75,10 +76,36 @@ probe_workspace="psd-render-probe-$$"
 owns_plugin=0
 client_pids=()
 
+case "$RENDER_BACKEND" in
+    legacy|dedicated)
+        ;;
+    *)
+        echo "PSD render probe: unknown backend: $RENDER_BACKEND" >&2
+        exit 1
+        ;;
+esac
+
+apply_transform() {
+    local offset="$1"
+    if [[ "$RENDER_BACKEND" == "dedicated" ]]; then
+        hyprctl dispatch plugin:psd:presentation-offset "$monitor_name $offset 0"
+    else
+        hyprctl dispatch plugin:psd:offset "$monitor_name $offset 0"
+    fi
+}
+
+reset_transform() {
+    if [[ "$RENDER_BACKEND" == "dedicated" ]]; then
+        hyprctl dispatch plugin:psd:presentation-reset "$monitor_name"
+    else
+        hyprctl dispatch plugin:psd:reset "$monitor_name"
+    fi
+}
+
 cleanup() {
     set +e
 
-    hyprctl dispatch plugin:psd:reset "$monitor_name" >/dev/null 2>&1 || true
+    reset_transform >/dev/null 2>&1 || true
 
     for pid in "${client_pids[@]}"; do
         [[ -n "$pid" ]] || continue
@@ -104,7 +131,7 @@ if [[ "$plugin_loaded" != "True" ]]; then
 fi
 
 capabilities="$(hyprctl -j psd-plugin)"
-python3 - "$capabilities" <<'PY'
+python3 - "$capabilities" "$RENDER_BACKEND" <<'PY'
 import json
 import sys
 
@@ -112,7 +139,10 @@ data = json.loads(sys.argv[1])
 assert data["protocolVersion"] == 3, data
 assert data["spatialRenderOffsetExperimental"] is True, data
 assert data["monitorTargeting"] is True, data
-print("PSD render probe: plugin capability handshake PASS")
+backend = sys.argv[2]
+if backend == "dedicated":
+    assert data["dedicatedPresentationOffsetExperimental"] is True, data
+print(f"PSD render probe: plugin capability handshake PASS backend={backend}")
 PY
 
 hyprctl dispatch focusmonitor "$monitor_name" | grep -qx "ok"
@@ -283,7 +313,7 @@ run_case() {
     local target_pid=""
     local anchor_pid=""
 
-    hyprctl dispatch plugin:psd:reset "$monitor_name" | grep -qx "ok"
+    reset_transform | grep -qx "ok"
 
     "$CLIENT_PATH" --title "$target_title" --color "#16f27a" >"$work_dir/$mode-target.log" 2>&1 &
     target_pid=$!
@@ -440,7 +470,7 @@ PY
 
     capture_output "$baseline"
 
-    hyprctl dispatch plugin:psd:offset "$monitor_name $logical_offset 0" | grep -qx "ok"
+    apply_transform "$logical_offset" | grep -qx "ok"
     sleep 0.2
 
     local compositor_state
@@ -448,7 +478,7 @@ PY
     compositor_state="$(hyprctl -j psd-plugin-state)"
     client_state="$(hyprctl -j clients)"
 
-    python3 - "$compositor_state" "$client_state" "$mode" "$target_title" "$logical_offset" <<'PY'
+    python3 - "$compositor_state" "$client_state" "$mode" "$target_title" "$logical_offset" "$RENDER_BACKEND" "$monitor_name" <<'PY'
 import json
 import sys
 
@@ -457,36 +487,62 @@ clients = json.loads(sys.argv[2])
 mode = sys.argv[3]
 title = sys.argv[4]
 expected = float(sys.argv[5])
+backend = sys.argv[6]
+monitor = sys.argv[7]
 
-transforms = state.get("trackedTransforms", [])
-if len(transforms) != 1:
-    raise SystemExit(f"PSD render probe: {mode} unexpected transform state: {state}")
-
-transform = transforms[0]
 client = next((item for item in clients if item.get("title") == title), None)
 if client is None:
     raise SystemExit(f"PSD render probe: {mode} client disappeared")
 
-workspace = client.get("workspace", {})
-print(
-    "PSD render probe: "
-    f"{mode} workspace diagnostic "
-    f"clientWorkspace={workspace.get('name')} "
-    f"trackedWorkspace={transform.get('workspace')} "
-    f"requested=({transform.get('requestedX')},{transform.get('requestedY')}) "
-    f"actual=({transform.get('actualX')},{transform.get('actualY')}) "
-    f"goal=({transform.get('goalX')},{transform.get('goalY')}) "
-    f"animated={transform.get('animated')}"
-)
-
-if str(workspace.get("name", "")) != str(transform.get("workspace", "")):
-    raise SystemExit(
-        f"PSD render probe: {mode} client/tracked workspace mismatch: "
-        f"client={workspace} transform={transform}"
+if backend == "dedicated":
+    entries = [
+        item for item in state.get("dedicatedPresentationOffsets", [])
+        if item.get("monitor") == monitor
+    ]
+    if len(entries) != 1:
+        raise SystemExit(
+            f"PSD render probe: {mode} unexpected dedicated transform state: {state}"
+        )
+    entry = entries[0]
+    if abs(float(entry.get("x", 0.0)) - expected) > 0.01:
+        raise SystemExit(
+            f"PSD render probe: {mode} wrong dedicated x offset: {entry}"
+        )
+    if abs(float(entry.get("y", 0.0))) > 0.01:
+        raise SystemExit(
+            f"PSD render probe: {mode} wrong dedicated y offset: {entry}"
+        )
+    print(
+        "PSD render probe: "
+        f"{mode} dedicated presentation diagnostic "
+        f"offset=({entry.get('x')},{entry.get('y')})"
     )
+else:
+    transforms = state.get("trackedTransforms", [])
+    if len(transforms) != 1:
+        raise SystemExit(f"PSD render probe: {mode} unexpected transform state: {state}")
+
+    transform = transforms[0]
+    workspace = client.get("workspace", {})
+    print(
+        "PSD render probe: "
+        f"{mode} workspace diagnostic "
+        f"clientWorkspace={workspace.get('name')} "
+        f"trackedWorkspace={transform.get('workspace')} "
+        f"requested=({transform.get('requestedX')},{transform.get('requestedY')}) "
+        f"actual=({transform.get('actualX')},{transform.get('actualY')}) "
+        f"goal=({transform.get('goalX')},{transform.get('goalY')}) "
+        f"animated={transform.get('animated')}"
+    )
+
+    if str(workspace.get("name", "")) != str(transform.get("workspace", "")):
+        raise SystemExit(
+            f"PSD render probe: {mode} client/tracked workspace mismatch: "
+            f"client={workspace} transform={transform}"
+        )
 PY
 
-    if [[ "$mode" != "tiled" ]]; then
+    if [[ "$RENDER_BACKEND" == "legacy" && "$mode" != "tiled" ]]; then
         python3 - "$compositor_state" "$mode" "$logical_offset" <<'PY'
 import json
 import sys
@@ -538,7 +594,7 @@ PY
     capture_output "$shifted"
     assert_pixel_translation "$baseline" "$shifted" "$physical_offset" "$mode"
 
-    hyprctl dispatch plugin:psd:reset "$monitor_name" | grep -qx "ok"
+    reset_transform | grep -qx "ok"
     sleep 0.2
     capture_output "$restored"
     assert_pixel_translation "$baseline" "$restored" 0 "$mode reset"
@@ -558,11 +614,11 @@ PY
         exit 1
     fi
 
-    echo "PSD render probe: $mode render-offset semantics PASS"
+    echo "PSD render probe: $mode render-offset semantics PASS backend=$RENDER_BACKEND"
 }
 
 run_case tiled
 run_case floating
 run_case pinned
 
-echo "PSD render probe: tiled/floating/pinned pixel evidence PASS"
+echo "PSD render probe: tiled/floating/pinned pixel evidence PASS backend=$RENDER_BACKEND"

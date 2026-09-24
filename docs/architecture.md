@@ -104,7 +104,7 @@ This layer is read-only during the bootstrap phase.
 
 The defining PSD spatial transform requires compositor-side cooperation. It should provide monitor-scoped continuous translation for CENTER and compositor-owned application windows while preserving input, focus, fullscreen semantics and damage tracking.
 
-The expected implementation is a narrow PSD-specific Hyprland plugin/extension behind the compositor abstraction.
+The expected implementation is a narrow PSD-specific Hyprland plugin/extension behind the compositor abstraction. The target architecture gives PSD a dedicated monitor-scoped presentation transform owned by the plugin; it must compose with, rather than reuse, Hyprland's native workspace-animation state. Internal renderer hooks are acceptable for the validation POC only, not as an assumed stable public contract.
 
 Do not implement the final effect by repeatedly dispatching per-window move commands unless a prototype demonstrates that compositor-level transformation is impossible.
 
