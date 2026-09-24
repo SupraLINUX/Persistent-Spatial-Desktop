@@ -203,6 +203,37 @@ PY
     return 1
 }
 
+
+wait_for_client_fullscreen() {
+    local title="$1"
+    local expected_active="$2"
+
+    for _ in $(seq 1 80); do
+        local clients_json
+        clients_json="$(hyprctl -j clients)"
+        if python3 - "$clients_json" "$title" "$expected_active" <<'PY' >/dev/null 2>&1
+import json
+import sys
+
+clients = json.loads(sys.argv[1])
+title = sys.argv[2]
+expected_active = sys.argv[3] == "1"
+client = next((item for item in clients if item.get("title") == title), None)
+if client is None:
+    raise SystemExit(1)
+
+active = int(client.get("fullscreen", 0)) != 0
+raise SystemExit(0 if active == expected_active else 1)
+PY
+        then
+            return 0
+        fi
+        sleep 0.05
+    done
+
+    return 1
+}
+
 client_geometry() {
     local title="$1"
     hyprctl -j clients | python3 -c '
@@ -1514,6 +1545,225 @@ PY
     echo "PSD render probe: dedicated damage/event-driven evidence PASS"
 }
 
+
+run_direct_scanout_guard_case() {
+    if [[ "$RENDER_BACKEND" != "dedicated" ]]; then
+        return
+    fi
+
+    local mode="direct-scanout-guard"
+    local target_title="psd-render-\${mode}-\${BASHPID}"
+    local target_pid=""
+    local logical_offset=96
+
+    reset_transform | grep -qx "ok"
+    hyprctl keyword render:direct_scanout 1 | grep -qx "ok"
+
+    "$CLIENT_PATH" \
+        --title "$target_title" \
+        --color "#334a88" \
+        >"$work_dir/$mode-client.log" 2>&1 &
+    target_pid=$!
+    client_pids+=("$target_pid")
+
+    if ! wait_for_client "$target_title" 0 0; then
+        echo "PSD render probe: direct-scanout guard target did not map." >&2
+        hyprctl -j clients >&2 || true
+        exit 1
+    fi
+
+    hyprctl dispatch focuswindow "title:^$target_title$" | grep -qx "ok"
+
+    # Maximized is still CENTER in PSD. It must remain spatially movable.
+    hyprctl dispatch fullscreen "1 set" | grep -qx "ok"
+    if ! wait_for_client_fullscreen "$target_title" 1; then
+        echo "PSD render probe: maximize state did not become active." >&2
+        hyprctl -j clients >&2 || true
+        exit 1
+    fi
+
+    apply_transform "$logical_offset" | grep -qx "ok"
+
+    local maximized_state
+    maximized_state="$(hyprctl -j psd-plugin-state)"
+    python3 - "$maximized_state" "$monitor_name" "$logical_offset" <<'PY'
+import json
+import sys
+
+state = json.loads(sys.argv[1])
+monitor = sys.argv[2]
+expected = float(sys.argv[3])
+entries = [
+    item for item in state.get("dedicatedPresentationOffsets", [])
+    if item.get("monitor") == monitor
+]
+if len(entries) != 1:
+    raise SystemExit(
+        f"PSD render probe: maximized CENTER lost dedicated offset: {state}"
+    )
+entry = entries[0]
+if abs(float(entry.get("x", 0.0)) - expected) > 0.01:
+    raise SystemExit(
+        f"PSD render probe: maximized CENTER wrong offset: {entry}"
+    )
+PY
+    echo "PSD render probe: maximized CENTER remains spatially movable PASS"
+
+    hyprctl dispatch fullscreen "1 unset" | grep -qx "ok"
+    if ! wait_for_client_fullscreen "$target_title" 0; then
+        echo "PSD render probe: maximize state did not clear." >&2
+        hyprctl -j clients >&2 || true
+        exit 1
+    fi
+
+    local recenter_before
+    local damage_before
+    local render_before
+    recenter_before="$(state_counter "fullscreenDedicatedResetCounts")"
+    damage_before="$(state_counter "dedicatedDamageRequests")"
+    render_before="$(state_counter "monitorRenderCounts")"
+
+    # Explicit fullscreen owns the whole monitor. The compositor callback must
+    # recenter PSD before a direct-scanout candidate can bypass renderWindow().
+    hyprctl dispatch fullscreen "0 set" | grep -qx "ok"
+    if ! wait_for_client_fullscreen "$target_title" 1; then
+        echo "PSD render probe: explicit fullscreen did not become active." >&2
+        hyprctl -j clients >&2 || true
+        exit 1
+    fi
+
+    wait_for_counter_after \
+        "fullscreenDedicatedResetCounts" "$recenter_before" "$mode fullscreen recenter"
+    wait_for_counter_after \
+        "dedicatedDamageRequests" "$damage_before" "$mode fullscreen recenter damage"
+    wait_for_counter_after \
+        "monitorRenderCounts" "$render_before" "$mode fullscreen recenter frame"
+
+    local fullscreen_state
+    fullscreen_state="$(hyprctl -j psd-plugin-state)"
+    python3 - "$fullscreen_state" "$monitor_name" <<'PY'
+import json
+import sys
+
+state = json.loads(sys.argv[1])
+monitor = sys.argv[2]
+entries = [
+    item for item in state.get("dedicatedPresentationOffsets", [])
+    if item.get("monitor") == monitor
+]
+if entries:
+    raise SystemExit(
+        f"PSD render probe: explicit fullscreen coexists with PSD offset: {state}"
+    )
+PY
+
+    local fullscreen_client_state
+    fullscreen_client_state="$(hyprctl -j clients)"
+    python3 - "$fullscreen_client_state" "$target_title" "$monitor_x" "$monitor_y" "$monitor_width" "$monitor_height" "$monitor_scale" <<'PY'
+import json
+import sys
+
+clients = json.loads(sys.argv[1])
+title = sys.argv[2]
+monitor_x = int(sys.argv[3])
+monitor_y = int(sys.argv[4])
+pixel_width = int(sys.argv[5])
+pixel_height = int(sys.argv[6])
+scale = float(sys.argv[7])
+client = next((item for item in clients if item.get("title") == title), None)
+if client is None:
+    raise SystemExit("PSD render probe: fullscreen client disappeared")
+
+at = client.get("at", [0, 0])
+size = client.get("size", [0, 0])
+logical_width = round(pixel_width / scale)
+logical_height = round(pixel_height / scale)
+
+if abs(int(at[0]) - monitor_x) > 2 or abs(int(at[1]) - monitor_y) > 2:
+    raise SystemExit(
+        f"PSD render probe: explicit fullscreen position is not monitor origin: {client}"
+    )
+if abs(int(size[0]) - logical_width) > 4 or abs(int(size[1]) - logical_height) > 4:
+    raise SystemExit(
+        f"PSD render probe: explicit fullscreen does not occupy whole monitor: {client}"
+    )
+PY
+    echo "PSD render probe: explicit fullscreen owns full monitor with zero PSD offset PASS"
+
+    local refused_output
+    local refused_status
+    set +e
+    refused_output="$(apply_transform "$logical_offset" 2>&1)"
+    refused_status=$?
+    set -e
+
+    if [[ "$refused_output" == "ok" ]] || [[ "$refused_output" != *"refusing dedicated presentation offset while explicit fullscreen content is active"* ]]; then
+        echo "PSD render probe: explicit fullscreen accepted a new PSD offset unexpectedly." >&2
+        echo "status=$refused_status output=$refused_output" >&2
+        exit 1
+    fi
+    echo "PSD render probe: explicit fullscreen rejects new PSD offset PASS"
+
+    # The QEMU/Qt client may not provide a scanout-capable DMA-BUF. Record the
+    # compositor's actual DS state without claiming hardware zero-copy success.
+    local monitor_state
+    monitor_state="$(hyprctl -j monitors)"
+    python3 - "$monitor_state" "$monitor_name" <<'PY'
+import json
+import sys
+
+monitors = json.loads(sys.argv[1])
+name = sys.argv[2]
+monitor = next((item for item in monitors if item.get("name") == name), None)
+if monitor is None:
+    raise SystemExit("PSD render probe: monitor disappeared during DS characterization")
+
+print(
+    "PSD render probe: direct-scanout diagnostic "
+    f"target={monitor.get('directScanoutTo')} "
+    f"blockedBy={monitor.get('directScanoutBlockedBy')}"
+)
+PY
+
+    hyprctl dispatch fullscreen "0 unset" | grep -qx "ok"
+    if ! wait_for_client_fullscreen "$target_title" 0; then
+        echo "PSD render probe: explicit fullscreen did not clear." >&2
+        hyprctl -j clients >&2 || true
+        exit 1
+    fi
+
+    local after_exit_state
+    after_exit_state="$(hyprctl -j psd-plugin-state)"
+    python3 - "$after_exit_state" "$monitor_name" <<'PY'
+import json
+import sys
+
+state = json.loads(sys.argv[1])
+monitor = sys.argv[2]
+entries = [
+    item for item in state.get("dedicatedPresentationOffsets", [])
+    if item.get("monitor") == monitor
+]
+if entries:
+    raise SystemExit(
+        f"PSD render probe: fullscreen exit restored stale PSD offset: {state}"
+    )
+PY
+
+    hyprctl keyword render:direct_scanout 0 | grep -qx "ok"
+
+    kill -TERM "$target_pid" >/dev/null 2>&1 || true
+    wait "$target_pid" >/dev/null 2>&1 || true
+    target_pid=""
+
+    if ! wait_for_client_gone "$target_title"; then
+        echo "PSD render probe: direct-scanout guard target remained after exit." >&2
+        exit 1
+    fi
+
+    echo "PSD render probe: fullscreen/direct-scanout guard semantics PASS"
+}
+
 run_case tiled
 run_case floating
 run_case pinned
@@ -1521,5 +1771,6 @@ run_popup_case
 run_subsurface_case
 run_decoration_case
 run_damage_case
+run_direct_scanout_guard_case
 
 echo "PSD render probe: tiled/floating/pinned pixel evidence PASS backend=$RENDER_BACKEND"

@@ -355,3 +355,53 @@ client and `set -e` terminated the probe.
 
 The test now uses `psd-render-${mode}-${BASHPID}`, giving the client a
 regex-safe unique title. No compositor/backend code changed in this correction.
+
+
+### Dedicated damage checkpoint — CI #231
+
+The deterministic damage probe passed end-to-end.
+
+Applying the dedicated offset advanced the monitor-local damage-request counter
+from 12 to 13 and the compositor `preRender` counter from 86 to 87. Both then
+remained stable during the idle observation window. Reset advanced the same
+counters from 13 to 14 and from 88 to 89 respectively, and again became idle.
+The framebuffer mask moved by +96 physical pixels on apply and -96 on reset
+without stale client-colored pixels remaining at the previous location.
+
+For the current dedicated POC this closes the damage/event-driven
+characterization: a persistent offset does not itself create a redraw loop.
+
+### Explicit fullscreen and direct-scanout invariant
+
+Hyprland 0.53.3 attempts direct scanout in `CMonitor::attemptDirectScanout()`
+before the normal render pass, therefore before PSD's `renderWindow()` hook.
+Its solitary-candidate path requires fullscreen content. A PSD presentation
+offset is private plugin state and is not represented by
+`CWorkspace::m_renderOffset`, so allowing explicit fullscreen to coexist with
+a non-zero dedicated offset would create a bypass risk.
+
+PSD therefore enforces the following compositor-side invariant:
+
+> explicit fullscreen and a non-zero dedicated PSD offset never coexist.
+
+The plugin listens to Hyprland's native `fullscreen` hook. If a window enters
+effective `FSMODE_FULLSCREEN` while its monitor has a dedicated PSD offset,
+the plugin erases that offset and damages the monitor immediately. While
+explicit fullscreen remains active, new dedicated offset requests are refused.
+Leaving fullscreen does not resurrect the previous displacement.
+
+This rule intentionally does **not** apply to `FSMODE_MAXIMIZED`. Maximized
+windows belong to CENTER according to the PSD product model and remain
+spatially movable with CENTER.
+
+PSD does not toggle Hyprland's global `m_directScanoutBlocked` boolean for
+this purpose. That flag is also used by other compositor subsystems such as
+screen sharing; treating it as plugin-owned state would create an unsafe
+ownership collision.
+
+The QEMU characterization enables `render:direct_scanout=1` and verifies the
+fullscreen/offset invariant plus the recenter damage/frame. It records
+Hyprland's direct-scanout diagnostic state, but does not claim successful
+zero-copy scanout unless the guest/client actually provides a scanout-capable
+DMA-BUF. Real DRM/NVIDIA direct-scanout validation therefore remains a
+hardware-specific requirement.

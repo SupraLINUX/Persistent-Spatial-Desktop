@@ -67,12 +67,14 @@ SP<HOOK_CALLBACK_FN> g_swipeBeginCallback;
 SP<HOOK_CALLBACK_FN> g_swipeUpdateCallback;
 SP<HOOK_CALLBACK_FN> g_swipeEndCallback;
 SP<HOOK_CALLBACK_FN> g_preRenderCallback;
+SP<HOOK_CALLBACK_FN> g_fullscreenCallback;
 CFunctionHook *g_renderWindowHook = nullptr;
 RenderWindowHookFn g_originalRenderWindow = nullptr;
 bool g_dedicatedPresentationAvailable = false;
 std::unordered_map<std::string, Vector2D> g_dedicatedMonitorOffsets;
 std::unordered_map<std::string, uint64_t> g_dedicatedDamageRequestCounts;
 std::unordered_map<std::string, uint64_t> g_monitorRenderCounts;
+std::unordered_map<std::string, uint64_t> g_fullscreenDedicatedResetCounts;
 std::vector<PHLWORKSPACEREF> g_touchedWorkspaces;
 std::unordered_map<std::string, MonitorTransformState> g_monitorTransforms;
 
@@ -83,6 +85,15 @@ uint64_t g_nextWorkspaceGeneration = 1;
 uint64_t g_workspaceSwitchResetCount = 0;
 uint64_t g_nativeWorkspaceAnimationConflictCount = 0;
 NativeWorkspaceAnimationConflict g_lastNativeWorkspaceAnimationConflict;
+
+bool workspaceHasExplicitFullscreen(const PHLWORKSPACE &workspace)
+{
+    if (!workspace || !workspace->m_hasFullscreenWindow)
+        return false;
+
+    const auto window = workspace->getFullscreenWindow();
+    return window && window->isEffectiveInternalFSMode(FSMODE_FULLSCREEN);
+}
 
 Vector2D dedicatedOffsetForMonitor(const PHLMONITOR &monitor)
 {
@@ -214,6 +225,24 @@ void damageDedicatedMonitor(const std::string &monitorName)
     g_pHyprRenderer->damageMonitor(monitor);
 }
 
+void onFullscreen(void *, SCallbackInfo &, std::any parameter)
+{
+    const auto window = std::any_cast<PHLWINDOW>(&parameter);
+    if (!window || !*window || !(*window)->isEffectiveInternalFSMode(FSMODE_FULLSCREEN))
+        return;
+
+    const auto monitor = (*window)->m_monitor.lock();
+    if (!monitor)
+        return;
+
+    const std::string monitorName = monitor->m_name;
+    if (g_dedicatedMonitorOffsets.erase(monitorName) == 0)
+        return;
+
+    ++g_fullscreenDedicatedResetCounts[monitorName];
+    damageDedicatedMonitor(monitorName);
+}
+
 SDispatchResult setDedicatedPresentationOffset(std::string arguments)
 {
     if (!g_dedicatedPresentationAvailable)
@@ -244,10 +273,10 @@ SDispatchResult setDedicatedPresentationOffset(std::string arguments)
     if (!workspace)
         return {.success = false, .error = "PSD: monitor has no active workspace"};
 
-    if (workspace->m_hasFullscreenWindow)
+    if (workspaceHasExplicitFullscreen(workspace))
         return {
             .success = false,
-            .error = "PSD: refusing dedicated presentation offset while fullscreen content is active",
+            .error = "PSD: refusing dedicated presentation offset while explicit fullscreen content is active",
         };
 
     const Vector2D offset{x, y};
@@ -652,12 +681,12 @@ std::string capabilitiesResponse(eHyprCtlOutputFormat format, std::string)
 {
     if (format == FORMAT_JSON) {
         return std::format(
-            R"json({{"protocolVersion":3,"pluginVersion":"0.1.5","spatialRenderOffsetExperimental":true,"monitorTargeting":true,"fourFingerGestureEventsExperimental":true,"gestureEventsDefaultEnabled":false,"diagnosticStateQueryExperimental":true,"lifecycleEventsExperimental":true,"rigidFloatingNormalizationExperimental":true,"pinnedPresentationOffsetExperimental":true,"nativeWorkspaceAnimationDiagnosticsExperimental":true,"dedicatedPresentationOffsetExperimental":{}}})json",
+            R"json({{"protocolVersion":3,"pluginVersion":"0.1.6","spatialRenderOffsetExperimental":true,"monitorTargeting":true,"fourFingerGestureEventsExperimental":true,"gestureEventsDefaultEnabled":false,"diagnosticStateQueryExperimental":true,"lifecycleEventsExperimental":true,"rigidFloatingNormalizationExperimental":true,"pinnedPresentationOffsetExperimental":true,"nativeWorkspaceAnimationDiagnosticsExperimental":true,"dedicatedPresentationOffsetExperimental":{}}})json",
             g_dedicatedPresentationAvailable ? "true" : "false");
     }
 
     return std::format(
-        "protocolVersion=3 pluginVersion=0.1.5 spatialRenderOffsetExperimental=true monitorTargeting=true fourFingerGestureEventsExperimental=true gestureEventsDefaultEnabled=false diagnosticStateQueryExperimental=true lifecycleEventsExperimental=true rigidFloatingNormalizationExperimental=true pinnedPresentationOffsetExperimental=true nativeWorkspaceAnimationDiagnosticsExperimental=true dedicatedPresentationOffsetExperimental={}",
+        "protocolVersion=3 pluginVersion=0.1.6 spatialRenderOffsetExperimental=true monitorTargeting=true fourFingerGestureEventsExperimental=true gestureEventsDefaultEnabled=false diagnosticStateQueryExperimental=true lifecycleEventsExperimental=true rigidFloatingNormalizationExperimental=true pinnedPresentationOffsetExperimental=true nativeWorkspaceAnimationDiagnosticsExperimental=true dedicatedPresentationOffsetExperimental={}",
         g_dedicatedPresentationAvailable ? "true" : "false");
 }
 
@@ -789,6 +818,20 @@ std::string stateResponse(eHyprCtlOutputFormat format, std::string)
             count);
     }
 
+    std::string fullscreenDedicatedResetCounts;
+    first = true;
+
+    for (const auto &[monitorName, count] : g_fullscreenDedicatedResetCounts) {
+        if (!first)
+            fullscreenDedicatedResetCounts += ',';
+        first = false;
+
+        fullscreenDedicatedResetCounts += std::format(
+            R"json({{"monitor":"{}","count":{}}})json",
+            jsonEscape(monitorName),
+            count);
+    }
+
     std::string activeWorkspaceAnimations;
     first = true;
 
@@ -833,7 +876,7 @@ std::string stateResponse(eHyprCtlOutputFormat format, std::string)
     }
 
     return std::format(
-        R"json({{"trackedTransforms":[{}],"touchedWorkspaceCount":{},"trackedPresentationWindowCount":{},"presentationOffsets":[{}],"workspaceSwitchResetCount":{},"dedicatedPresentationOffsets":[{}],"dedicatedDamageRequests":[{}],"monitorRenderCounts":[{}],"activeWorkspaceAnimations":[{}],"nativeWorkspaceAnimationConflictCount":{},"lastNativeWorkspaceAnimationConflict":{},"gestureEventsEnabled":{},"gestureActive":{}}})json",
+        R"json({{"trackedTransforms":[{}],"touchedWorkspaceCount":{},"trackedPresentationWindowCount":{},"presentationOffsets":[{}],"workspaceSwitchResetCount":{},"dedicatedPresentationOffsets":[{}],"dedicatedDamageRequests":[{}],"monitorRenderCounts":[{}],"fullscreenDedicatedResetCounts":[{}],"activeWorkspaceAnimations":[{}],"nativeWorkspaceAnimationConflictCount":{},"lastNativeWorkspaceAnimationConflict":{},"gestureEventsEnabled":{},"gestureActive":{}}})json",
         transforms,
         g_touchedWorkspaces.size(),
         std::accumulate(
@@ -848,6 +891,7 @@ std::string stateResponse(eHyprCtlOutputFormat format, std::string)
         dedicatedPresentationOffsets,
         dedicatedDamageRequests,
         monitorRenderCounts,
+        fullscreenDedicatedResetCounts,
         activeWorkspaceAnimations,
         g_nativeWorkspaceAnimationConflictCount,
         lastNativeConflict,
@@ -890,6 +934,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle)
 
     g_dedicatedDamageRequestCounts.clear();
     g_monitorRenderCounts.clear();
+    g_fullscreenDedicatedResetCounts.clear();
     g_dedicatedPresentationAvailable = installDedicatedPresentationHook();
 
     bool success = true;
@@ -928,6 +973,8 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle)
         g_handle, "swipeEnd", onSwipeEnd);
     g_preRenderCallback = HyprlandAPI::registerCallbackDynamic(
         g_handle, "preRender", onPreRender);
+    g_fullscreenCallback = HyprlandAPI::registerCallbackDynamic(
+        g_handle, "fullscreen", onFullscreen);
 
     success = success
         && static_cast<bool>(g_capabilitiesCommand)
@@ -935,7 +982,8 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle)
         && static_cast<bool>(g_swipeBeginCallback)
         && static_cast<bool>(g_swipeUpdateCallback)
         && static_cast<bool>(g_swipeEndCallback)
-        && static_cast<bool>(g_preRenderCallback);
+        && static_cast<bool>(g_preRenderCallback)
+        && static_cast<bool>(g_fullscreenCallback);
 
     if (!success)
         throw std::runtime_error("PSD failed to register experimental Hyprland integration");
@@ -946,7 +994,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle)
         "psd-hyprland-plugin",
         "Persistent Spatial Desktop compositor integration experiment",
         "SupraLINUX",
-        "0.1.5",
+        "0.1.6",
     };
 }
 
@@ -969,6 +1017,7 @@ APICALL EXPORT void PLUGIN_EXIT()
     g_swipeUpdateCallback.reset();
     g_swipeEndCallback.reset();
     g_preRenderCallback.reset();
+    g_fullscreenCallback.reset();
 
     if (g_handle) {
         if (g_capabilitiesCommand)
