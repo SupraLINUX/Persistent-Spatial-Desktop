@@ -106,6 +106,7 @@ cleanup() {
     set +e
 
     reset_transform >/dev/null 2>&1 || true
+    hyprctl keyword render:direct_scanout 0 >/dev/null 2>&1 || true
 
     for pid in "${client_pids[@]}"; do
         [[ -n "$pid" ]] || continue
@@ -1552,10 +1553,11 @@ run_direct_scanout_guard_case() {
     fi
 
     local mode="direct-scanout-guard"
-    local target_title="psd-render-\${mode}-\${BASHPID}"
+    local target_title="psd-render-${mode}-${BASHPID}"
     local target_pid=""
     local logical_offset=96
 
+    echo "PSD render probe: direct-scanout guard begin title=$target_title"
     reset_transform | grep -qx "ok"
     hyprctl keyword render:direct_scanout 1 | grep -qx "ok"
 

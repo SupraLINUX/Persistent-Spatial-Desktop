@@ -405,3 +405,18 @@ Hyprland's direct-scanout diagnostic state, but does not claim successful
 zero-copy scanout unless the guest/client actually provides a scanout-capable
 DMA-BUF. Real DRM/NVIDIA direct-scanout validation therefore remains a
 hardware-specific requirement.
+
+
+#### Direct-scanout probe harness correction — CI #232
+
+CI #232 reached and passed the complete dedicated damage probe, then exited at
+the start of the new direct-scanout guard before any fullscreen assertion ran.
+The generated Bash source had preserved escapes around
+`${mode}` and `${BASHPID}`, so the client title contained literal shell
+syntax. Reusing that title as a Hyprland window regex prevented the guard from
+targeting the window correctly.
+
+The title now expands normally at Bash runtime. The probe also prints an
+explicit guard-entry marker and its cleanup trap always restores
+`render:direct_scanout=0`, including failure paths. No compositor/backend
+semantics changed in this correction.
