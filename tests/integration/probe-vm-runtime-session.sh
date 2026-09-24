@@ -182,23 +182,32 @@ if [[ "${PSD_PROBE_USE_NATIVE_BACKEND:-0}" == "1" ]]; then
 fi
 
 
-wait_for_monitor_scale() {
-    local expected="$1"
-
-    for _ in $(seq 1 80); do
-        local monitors_json
-        monitors_json="$(hyprctl -j monitors)"
-        if python3 - "$monitors_json" "$monitor_name" "$expected" <<'PY' >/dev/null 2>&1
+monitor_scale() {
+    local monitors_json
+    monitors_json="$(hyprctl -j monitors)"
+    python3 - "$monitors_json" "$monitor_name" <<'PY'
 import json
 import sys
 
 monitors = json.loads(sys.argv[1])
 name = sys.argv[2]
-expected = float(sys.argv[3])
 monitor = next((item for item in monitors if item.get("name") == name), None)
 if monitor is None:
     raise SystemExit(1)
-actual = float(monitor.get("scale", 1.0) or 1.0)
+print(float(monitor.get("scale", 1.0) or 1.0))
+PY
+}
+
+wait_for_monitor_scale() {
+    local expected="$1"
+
+    for _ in $(seq 1 80); do
+        local actual
+        actual="$(monitor_scale)"
+        if python3 - "$actual" "$expected" <<'PY' >/dev/null 2>&1
+import sys
+actual = float(sys.argv[1])
+expected = float(sys.argv[2])
 raise SystemExit(0 if abs(actual - expected) <= 0.01 else 1)
 PY
         then
@@ -218,6 +227,39 @@ set_monitor_scale() {
     wait_for_monitor_scale "$scale"
 }
 
+set_fractional_monitor_scale() {
+    local requested="$1"
+
+    hyprctl keyword monitor "$monitor_name,preferred,auto,$requested" | grep -qx "ok"
+
+    for _ in $(seq 1 80); do
+        local actual
+        actual="$(monitor_scale)"
+
+        if python3 - "$actual" "$original_monitor_scale" <<'PY' >/dev/null 2>&1
+import math
+import sys
+
+actual = float(sys.argv[1])
+original = float(sys.argv[2])
+
+changed = abs(actual - original) > 0.01
+fractional = abs(actual - round(actual)) > 0.01
+raise SystemExit(0 if changed and fractional else 1)
+PY
+        then
+            echo "$actual"
+            return 0
+        fi
+
+        sleep 0.05
+    done
+
+    echo "PSD VM runtime probe: monitor $monitor_name did not settle on a fractional scale after request=$requested" >&2
+    hyprctl -j monitors >&2 || true
+    return 1
+}
+
 test_client_path="${PSD_PROBE_TEST_CLIENT:-build/tests/psd-integration-client}"
 if [[ ! -x "$test_client_path" ]]; then
     echo "PSD VM runtime probe: integration test client not found: $test_client_path" >&2
@@ -229,11 +271,14 @@ PSD_RENDER_PROBE_BACKEND=legacy \
 PSD_RENDER_PROBE_BACKEND=dedicated \
     bash "$(dirname "$0")/probe-vm-render-transform.sh" "$test_client_path" "$PLUGIN_PATH"
 
-echo "PSD VM runtime probe: fractional-scale characterization begin scale=1.5"
-set_monitor_scale 1.5
+echo "PSD VM runtime probe: fractional-scale characterization begin requested=1.5"
+fractional_scale="$(set_fractional_monitor_scale 1.5)"
+echo "PSD VM runtime probe: fractional-scale effective=$fractional_scale"
+
 PSD_RENDER_PROBE_BACKEND=dedicated \
     bash "$(dirname "$0")/probe-vm-render-transform.sh" "$test_client_path" "$PLUGIN_PATH"
-echo "PSD VM runtime probe: fractional-scale characterization PASS scale=1.5"
+
+echo "PSD VM runtime probe: fractional-scale characterization PASS effective=$fractional_scale"
 
 set_monitor_scale "$original_monitor_scale"
 echo "PSD VM runtime probe: monitor scale restored to $original_monitor_scale"

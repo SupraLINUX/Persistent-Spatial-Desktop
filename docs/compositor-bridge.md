@@ -468,3 +468,23 @@ explicit Python argument. A scan of the integration scripts confirmed no other
 `python3 -` heredoc is fed simultaneously by a pipe; existing piped helpers
 use `python3 -c` and consume stdin normally. No compositor/backend code
 changed in this correction.
+
+
+#### Fractional-scale normalization checkpoint — CI #235
+
+CI #235 reached the fractional-scale setup for the first time. Hyprland
+accepted the requested scale 1.5 but reported an effective scale of 1.60 on the
+1280x800 QEMU output.
+
+This is expected Hyprland 0.53.3 behavior rather than a backend failure.
+`CMonitor::applyMonitorRule()` checks whether `pixelSize / scale` produces
+integer logical dimensions. If not, it searches in 1/120 increments for the
+nearest scale that is a clean divisor. For 1280x800, scale 1.6 yields an exact
+800x500 logical output.
+
+The CI therefore no longer assumes that the requested fractional scale is the
+effective one. It requests 1.5, waits for Hyprland to settle on a scale that is
+both different from the original and genuinely fractional, records that live
+effective value, and then runs the complete dedicated render suite. The render
+probe already derives physical displacement from the live monitor scale, so
+its pixel expectations automatically follow Hyprland's accepted scale.
