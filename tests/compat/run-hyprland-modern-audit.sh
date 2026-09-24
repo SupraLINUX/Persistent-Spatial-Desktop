@@ -352,10 +352,10 @@ check_min hyprlang 0.6.7 hypr-stack
 check_min hyprcursor 0.1.7 hypr-stack
 check_min hyprutils 0.14.0 hypr-stack
 check_min hyprgraphics 0.5.1 hypr-stack
-check_min xkbcommon 1.11.0 ubuntu-base
-check_min wayland-server 1.22.91 ubuntu-base
-check_min wayland-protocols 1.49 ubuntu-base
-check_min libinput 1.29 ubuntu-base
+check_min xkbcommon 1.11.0 ubuntu-runtime
+check_min wayland-server 1.22.91 ubuntu-runtime
+check_min wayland-protocols 1.49 build-only
+check_min libinput 1.29 ubuntu-runtime
 
 lua_version="MISSING"
 for lua_module in lua55 lua5.5 lua-55 lua-5.5 lua; do
@@ -476,6 +476,17 @@ if [[ "$isolated_stack_status" == "pass" ]]; then
   HYPR_ISO_SRC="$SRC_DIR/Hyprland-isolated"
   git clone --quiet --depth 1 --branch "$HYPRLAND_TAG" --recursive https://github.com/hyprwm/Hyprland.git "$HYPR_ISO_SRC"
 
+  section "Apply Ubuntu 26.04 / GCC 15 source-compatibility patch"
+  compat_patch="$GITHUB_WORKSPACE/tests/compat/patches/hyprland-v0.56.2-gcc15-ranges-starts-with.patch"
+  if patch --dry-run -d "$HYPR_ISO_SRC" -p1 < "$compat_patch" >"$REPORT_DIR/gcc15-compat-patch-dry-run.log" 2>&1; then
+    patch -d "$HYPR_ISO_SRC" -p1 < "$compat_patch" >"$REPORT_DIR/gcc15-compat-patch.log" 2>&1
+    record_status HYPRLAND_GCC15_COMPAT_PATCH applied
+  else
+    cat "$REPORT_DIR/gcc15-compat-patch-dry-run.log"
+    record_status HYPRLAND_GCC15_COMPAT_PATCH failed
+    isolated_hyprland_status="patch-fail"
+  fi
+
   set +e
   cmake -S "$HYPR_ISO_SRC" -B "$BUILD_DIR/Hyprland-isolated" -G Ninja \
     -DCMAKE_BUILD_TYPE=Release \
@@ -487,7 +498,11 @@ if [[ "$isolated_stack_status" == "pass" ]]; then
   isolated_configure_rc=$?
   set -e
 
-  if [[ "$isolated_configure_rc" -eq 0 ]]; then
+  if [[ "$isolated_hyprland_status" == "patch-fail" ]]; then
+    isolated_configure_rc=125
+  fi
+
+  if [[ "$isolated_hyprland_status" != "patch-fail" && "$isolated_configure_rc" -eq 0 ]]; then
     set +e
     cmake --build "$BUILD_DIR/Hyprland-isolated" --parallel 2 >"$REPORT_DIR/isolated-hyprland-build.log" 2>&1
     isolated_build_rc=$?
