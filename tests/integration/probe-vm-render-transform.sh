@@ -4,6 +4,7 @@ set -euo pipefail
 CLIENT_PATH="${1:-build/tests/psd-integration-client}"
 PLUGIN_PATH="${2:-build-hypr/src/compositor/hyprland-plugin/psd-hyprland-plugin.so}"
 RENDER_BACKEND="${PSD_RENDER_PROBE_BACKEND:-legacy}"
+HYPRLAND_LOG_FILE="${PSD_HYPRLAND_LOG_FILE:-}"
 
 for command in grim hyprctl python3 realpath; do
     if ! command -v "$command" >/dev/null 2>&1; then
@@ -306,6 +307,143 @@ print(
 PY
 }
 
+
+
+monitor_damage_count() {
+    if [[ -z "$HYPRLAND_LOG_FILE" || ! -f "$HYPRLAND_LOG_FILE" ]]; then
+        echo "PSD render probe: Hyprland log unavailable for damage characterization: $HYPRLAND_LOG_FILE" >&2
+        exit 1
+    fi
+
+    awk -v marker="Damage: Monitor $monitor_name" '
+        index($0, marker) { count++ }
+        END { print count + 0 }
+    ' "$HYPRLAND_LOG_FILE"
+}
+
+wait_for_monitor_damage_after() {
+    local before="$1"
+    local label="$2"
+
+    for _ in $(seq 1 80); do
+        local now
+        now="$(monitor_damage_count)"
+        if (( now > before )); then
+            echo "PSD render probe: $label native monitor damage PASS count=$before->$now"
+            return
+        fi
+        sleep 0.05
+    done
+
+    echo "PSD render probe: $label did not reach Hyprland damageMonitor()." >&2
+    tail -n 200 "$HYPRLAND_LOG_FILE" >&2 || true
+    exit 1
+}
+
+assert_no_repeated_monitor_damage() {
+    local before="$1"
+    local label="$2"
+
+    # A persistent PSD offset is state, not an animation source. Once the
+    # apply-triggered frame settles, the plugin must not request monitor-wide
+    # damage repeatedly while no input/client damage occurs.
+    sleep 0.5
+
+    local after
+    after="$(monitor_damage_count)"
+    if [[ "$after" != "$before" ]]; then
+        echo "PSD render probe: $label repeated monitor damage while idle: $before->$after" >&2
+        tail -n 200 "$HYPRLAND_LOG_FILE" >&2 || true
+        exit 1
+    fi
+
+    echo "PSD render probe: $label idle damage stability PASS count=$after"
+}
+
+assert_damage_cleanup() {
+    local baseline="$1"
+    local candidate="$2"
+    local expected_dx="$3"
+    local label="$4"
+
+    python3 - "$baseline" "$candidate" "$expected_dx" "$label" <<'PY'
+from PIL import Image
+import sys
+
+baseline_path, candidate_path = sys.argv[1], sys.argv[2]
+expected_dx = int(sys.argv[3])
+label = sys.argv[4]
+target = (22, 242, 122)
+
+def mask(path):
+    image = Image.open(path).convert("RGB")
+    width, height = image.size
+    pixels = image.load()
+    points = set()
+
+    for y in range(height):
+        for x in range(width):
+            r, g, b = pixels[x, y]
+            if (
+                abs(r - target[0]) <= 3
+                and abs(g - target[1]) <= 3
+                and abs(b - target[2]) <= 3
+            ):
+                points.add((x, y))
+
+    if len(points) < 10000:
+        raise SystemExit(
+            f"{label}: too few deterministic client pixels ({len(points)}) in {path}"
+        )
+
+    return width, height, points
+
+width, height, baseline = mask(baseline_path)
+width2, height2, candidate = mask(candidate_path)
+if (width2, height2) != (width, height):
+    raise SystemExit(f"{label}: screenshot dimensions changed")
+
+expected = {
+    (x + expected_dx, y)
+    for x, y in baseline
+    if 0 <= x + expected_dx < width
+}
+
+missing = expected - candidate
+unexpected = candidate - expected
+reference = max(1, len(expected))
+missing_ratio = len(missing) / reference
+unexpected_ratio = len(unexpected) / reference
+
+def bbox(points):
+    xs = [x for x, _ in points]
+    ys = [y for _, y in points]
+    return (min(xs), min(ys), max(xs), max(ys))
+
+print(
+    f"PSD render probe: {label} damage diagnostic "
+    f"baselineBBox={bbox(baseline)} candidateBBox={bbox(candidate)} "
+    f"missing={len(missing)} unexpected={len(unexpected)}"
+)
+
+if missing_ratio > 0.01:
+    raise SystemExit(
+        f"{label}: translated client pixels were not repainted "
+        f"(missing ratio={missing_ratio:.4f})"
+    )
+
+if unexpected_ratio > 0.01:
+    raise SystemExit(
+        f"{label}: stale/ghost client pixels remained after damage "
+        f"(unexpected ratio={unexpected_ratio:.4f})"
+    )
+
+print(
+    f"PSD render probe: {label} old/new damage cleanup "
+    f"{expected_dx}px PASS"
+)
+PY
+}
 
 assert_decoration_translation() {
     local baseline="$1"
@@ -1213,11 +1351,135 @@ PY
     echo "PSD render probe: compositor decoration pixel evidence PASS backend=$RENDER_BACKEND"
 }
 
+
+run_damage_case() {
+    if [[ "$RENDER_BACKEND" != "dedicated" ]]; then
+        return
+    fi
+
+    local mode="damage"
+    local target_title="psd-render-$mode-$$"
+    local target_pid=""
+    local baseline="$work_dir/$mode-baseline.png"
+    local shifted="$work_dir/$mode-shifted.png"
+    local restored="$work_dir/$mode-restored.png"
+
+    reset_transform | grep -qx "ok"
+
+    "$CLIENT_PATH" \
+        --title "$target_title" \
+        --color "#16f27a" \
+        >"$work_dir/$mode-client.log" 2>&1 &
+    target_pid=$!
+    client_pids+=("$target_pid")
+
+    if ! wait_for_client "$target_title" 0 0; then
+        echo "PSD render probe: damage target did not map tiled." >&2
+        hyprctl -j clients >&2 || true
+        exit 1
+    fi
+
+    hyprctl dispatch focuswindow "title:^$target_title$" | grep -qx "ok"
+    hyprctl dispatch togglefloating active | grep -qx "ok"
+    hyprctl dispatch resizeactive "exact 480 320" | grep -qx "ok"
+    hyprctl dispatch centerwindow | grep -qx "ok"
+
+    if ! wait_for_client "$target_title" 1 0; then
+        echo "PSD render probe: damage target did not become floating." >&2
+        hyprctl -j clients >&2 || true
+        exit 1
+    fi
+
+    local geometry_ready=0
+    local geometry_now=""
+    for _ in $(seq 1 60); do
+        geometry_now="$(client_geometry "$target_title" || true)"
+        if python3 - "$geometry_now" <<'PY' >/dev/null 2>&1
+import sys
+if not sys.argv[1]:
+    raise SystemExit(1)
+_, _, w, h = map(int, sys.argv[1].split(","))
+raise SystemExit(0 if abs(w - 480) <= 4 and abs(h - 320) <= 4 else 1)
+PY
+        then
+            geometry_ready=1
+            break
+        fi
+        sleep 0.1
+    done
+
+    if [[ "$geometry_ready" != "1" ]]; then
+        echo "PSD render probe: damage target geometry did not settle." >&2
+        hyprctl -j clients >&2 || true
+        exit 1
+    fi
+
+    sleep 0.2
+
+    local geometry_before
+    geometry_before="$(client_geometry "$target_title")"
+
+    local logical_offset=96
+    local physical_offset
+    physical_offset="$(
+        python3 - "$logical_offset" "$monitor_scale" <<'PY'
+import sys
+print(round(float(sys.argv[1]) * float(sys.argv[2])))
+PY
+    )"
+
+    capture_output "$baseline"
+
+    local damage_before
+    damage_before="$(monitor_damage_count)"
+    apply_transform "$logical_offset" | grep -qx "ok"
+    wait_for_monitor_damage_after "$damage_before" "$mode apply"
+
+    local damage_after_apply
+    damage_after_apply="$(monitor_damage_count)"
+    assert_no_repeated_monitor_damage "$damage_after_apply" "$mode apply"
+
+    local geometry_shifted
+    geometry_shifted="$(client_geometry "$target_title")"
+    if [[ "$geometry_shifted" != "$geometry_before" ]]; then
+        echo "PSD render probe: damage target logical geometry changed under render-only offset." >&2
+        echo "before=$geometry_before shifted=$geometry_shifted" >&2
+        exit 1
+    fi
+
+    capture_output "$shifted"
+    assert_damage_cleanup "$baseline" "$shifted" "$physical_offset" "$mode apply"
+
+    local damage_before_reset
+    damage_before_reset="$(monitor_damage_count)"
+    reset_transform | grep -qx "ok"
+    wait_for_monitor_damage_after "$damage_before_reset" "$mode reset"
+
+    local damage_after_reset
+    damage_after_reset="$(monitor_damage_count)"
+    assert_no_repeated_monitor_damage "$damage_after_reset" "$mode reset"
+
+    capture_output "$restored"
+    assert_damage_cleanup "$shifted" "$restored" "$((-physical_offset))" "$mode reset"
+
+    kill -TERM "$target_pid" >/dev/null 2>&1 || true
+    wait "$target_pid" >/dev/null 2>&1 || true
+    target_pid=""
+
+    if ! wait_for_client_gone "$target_title"; then
+        echo "PSD render probe: damage target remained in compositor state after exit." >&2
+        exit 1
+    fi
+
+    echo "PSD render probe: dedicated damage/event-driven evidence PASS"
+}
+
 run_case tiled
 run_case floating
 run_case pinned
 run_popup_case
 run_subsurface_case
 run_decoration_case
+run_damage_case
 
 echo "PSD render probe: tiled/floating/pinned pixel evidence PASS backend=$RENDER_BACKEND"

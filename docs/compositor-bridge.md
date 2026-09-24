@@ -282,3 +282,40 @@ Compositor-owned decorations remain a separate requirement. The next
 characterization uses a deterministic Hyprland border color that does not occur
 in the client surface and correlates those border pixels independently from the
 window contents.
+
+
+### Dedicated compositor-decoration checkpoint — CI #227
+
+The dedicated backend now has explicit compositor-owned decoration evidence.
+
+The Ubuntu 26.04 QEMU session configures an 8-pixel solid magenta Hyprland
+border while the client paints a color that cannot match that border. The
+probe therefore correlates only compositor-owned decoration pixels. Under a 96
+logical-unit PSD offset at scale 1.0, the border bounding box moved from
+`x=392..887` to `x=488..983`, exactly 96 physical pixels, with overlap
+1.000. Reset returned the border to its original bounding box with overlap
+1.000.
+
+This validates compositor decoration translation for the current dedicated
+`renderWindow()` POC.
+
+### Dedicated damage characterization
+
+Damage is not inferred from successful screenshots alone. Hyprland 0.53.3's
+native `CHyprRenderer::damageMonitor()` adds monitor-wide damage and
+`CMonitor::addDamage()` schedules a frame when that damage is new. The
+dedicated PSD dispatcher already calls this path when an offset is applied and
+when it is reset.
+
+The QEMU probe now enables Hyprland's native `debug:log_damage` output and
+requires each dedicated apply/reset operation to produce a
+`Damage: Monitor <name>` event. It also performs a strict old/new pixel-mask
+comparison: translated client pixels must appear at the new position and no
+stale client-colored pixels may remain in the old position.
+
+Finally, after the apply-triggered and reset-triggered frames settle, the probe
+holds the scene static and requires the monitor-damage count to remain stable.
+This checks the architectural property that a persistent PSD offset is state,
+not a polling/redraw loop. The dedicated hook itself contains no timer or
+animation driver; subsequent rendering remains driven by compositor/client
+damage and other normal Wayland events.
