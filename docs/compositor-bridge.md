@@ -453,3 +453,18 @@ wl_subsurface, compositor decorations, damage/event-driven behavior and the
 fullscreen/direct-scanout guard under fractional scaling. The runtime restores
 the original monitor scale before continuing with later probes and also
 restores it from the cleanup trap on failure.
+
+
+#### Fractional-scale harness correction — CI #234
+
+CI #234 did not reach the fractional-scale characterization. The new runtime
+helper repeated the same pipe-plus-heredoc stdin collision previously removed
+from the damage probe: `hyprctl -j monitors | python3 - <<'PY'` caused the
+heredoc carrying the Python program to replace the JSON stream on standard
+input, producing `JSONDecodeError` before the render suite started.
+
+The runtime now captures `hyprctl -j monitors` first and passes the JSON as an
+explicit Python argument. A scan of the integration scripts confirmed no other
+`python3 -` heredoc is fed simultaneously by a pipe; existing piped helpers
+use `python3 -c` and consume stdin normally. No compositor/backend code
+changed in this correction.

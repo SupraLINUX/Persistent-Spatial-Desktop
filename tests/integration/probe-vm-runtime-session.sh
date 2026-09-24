@@ -142,13 +142,14 @@ if [[ -z "$monitor_name" ]]; then
     exit 1
 fi
 
+monitor_json="$(hyprctl -j monitors)"
 original_monitor_scale="$(
-    hyprctl -j monitors | python3 - "$monitor_name" <<'PY'
+    python3 - "$monitor_json" "$monitor_name" <<'PY'
 import json
 import sys
 
-monitors = json.load(sys.stdin)
-name = sys.argv[1]
+monitors = json.loads(sys.argv[1])
+name = sys.argv[2]
 monitor = next((item for item in monitors if item.get("name") == name), None)
 if monitor is None:
     raise SystemExit(1)
