@@ -420,3 +420,36 @@ The title now expands normally at Bash runtime. The probe also prints an
 explicit guard-entry marker and its cleanup trap always restores
 `render:direct_scanout=0`, including failure paths. No compositor/backend
 semantics changed in this correction.
+
+
+### Fullscreen/direct-scanout guard checkpoint — CI #233
+
+The compositor-side invariant passed in QEMU with
+`render:direct_scanout=1`.
+
+The probe confirmed that `FSMODE_MAXIMIZED` remains spatially movable with
+CENTER. Entering explicit `FSMODE_FULLSCREEN` while a dedicated offset was
+active advanced the fullscreen recenter counter from 0 to 1, advanced the
+dedicated damage counter from 15 to 16, and produced new compositor frames.
+The resulting fullscreen window occupied the complete monitor with no
+dedicated PSD offset, and additional offset requests were rejected until
+fullscreen exited.
+
+Hyprland reported `directScanoutTo=0` with blocking reasons `SW` and
+`SURFACE` in the QEMU guest. Therefore CI validates the safety invariant but
+does not claim that real DRM/KMS zero-copy scanout occurred. Hardware direct
+scanout, especially the NVIDIA path, remains a later hardware validation item.
+
+### Fractional-scale characterization
+
+The next CI characterization reuses the complete dedicated render suite at
+monitor scale 1.5 rather than introducing a reduced special-case test. The
+existing probe derives physical translation from the live monitor scale, so
+the standard 96-logical-unit displacement must correlate at 144 physical
+pixels.
+
+This pass therefore covers tiled, floating and pinned windows, xdg_popup,
+wl_subsurface, compositor decorations, damage/event-driven behavior and the
+fullscreen/direct-scanout guard under fractional scaling. The runtime restores
+the original monitor scale before continuing with later probes and also
+restores it from the cleanup trap on failure.

@@ -43,6 +43,7 @@ runtime_dir=""
 owns_runtime_dir=0
 log_file="${TMPDIR:-/tmp}/psd-hyprland-vm-runtime.log"
 hyprland_pid=""
+original_monitor_scale=""
 
 if [[ "${PSD_PROBE_USE_WAYLAND_BACKEND:-0}" == "1" ]]; then
     if [[ -z "${XDG_RUNTIME_DIR:-}" || -z "${WAYLAND_DISPLAY:-}" ]]; then
@@ -70,6 +71,10 @@ fi
 
 cleanup() {
     set +e
+
+    if [[ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" && -n "${monitor_name:-}" && -n "${original_monitor_scale:-}" ]]; then
+        hyprctl keyword monitor "$monitor_name,preferred,auto,$original_monitor_scale" >/dev/null 2>&1 || true
+    fi
 
     if [[ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ]]; then
         hyprctl dispatch exit >/dev/null 2>&1 || true
@@ -137,9 +142,23 @@ if [[ -z "$monitor_name" ]]; then
     exit 1
 fi
 
+original_monitor_scale="$(
+    hyprctl -j monitors | python3 - "$monitor_name" <<'PY'
+import json
+import sys
+
+monitors = json.load(sys.stdin)
+name = sys.argv[1]
+monitor = next((item for item in monitors if item.get("name") == name), None)
+if monitor is None:
+    raise SystemExit(1)
+print(float(monitor.get("scale", 1.0) or 1.0))
+PY
+)"
+
 echo "PSD VM runtime probe: using guest DRM render node(s):"
 ls -l /dev/dri/renderD*
-echo "PSD VM runtime probe: using Hyprland output $monitor_name"
+echo "PSD VM runtime probe: using Hyprland output $monitor_name scale=$original_monitor_scale"
 
 if [[ "${PSD_PROBE_USE_NATIVE_BACKEND:-0}" == "1" ]]; then
     wayland_socket=""
@@ -161,6 +180,43 @@ if [[ "${PSD_PROBE_USE_NATIVE_BACKEND:-0}" == "1" ]]; then
     echo "PSD VM runtime probe: shell Wayland socket $WAYLAND_DISPLAY"
 fi
 
+
+wait_for_monitor_scale() {
+    local expected="$1"
+
+    for _ in $(seq 1 80); do
+        local monitors_json
+        monitors_json="$(hyprctl -j monitors)"
+        if python3 - "$monitors_json" "$monitor_name" "$expected" <<'PY' >/dev/null 2>&1
+import json
+import sys
+
+monitors = json.loads(sys.argv[1])
+name = sys.argv[2]
+expected = float(sys.argv[3])
+monitor = next((item for item in monitors if item.get("name") == name), None)
+if monitor is None:
+    raise SystemExit(1)
+actual = float(monitor.get("scale", 1.0) or 1.0)
+raise SystemExit(0 if abs(actual - expected) <= 0.01 else 1)
+PY
+        then
+            return 0
+        fi
+        sleep 0.05
+    done
+
+    echo "PSD VM runtime probe: monitor $monitor_name did not reach scale=$expected" >&2
+    hyprctl -j monitors >&2 || true
+    return 1
+}
+
+set_monitor_scale() {
+    local scale="$1"
+    hyprctl keyword monitor "$monitor_name,preferred,auto,$scale" | grep -qx "ok"
+    wait_for_monitor_scale "$scale"
+}
+
 test_client_path="${PSD_PROBE_TEST_CLIENT:-build/tests/psd-integration-client}"
 if [[ ! -x "$test_client_path" ]]; then
     echo "PSD VM runtime probe: integration test client not found: $test_client_path" >&2
@@ -171,6 +227,16 @@ PSD_RENDER_PROBE_BACKEND=legacy \
     bash "$(dirname "$0")/probe-vm-render-transform.sh" "$test_client_path" "$PLUGIN_PATH"
 PSD_RENDER_PROBE_BACKEND=dedicated \
     bash "$(dirname "$0")/probe-vm-render-transform.sh" "$test_client_path" "$PLUGIN_PATH"
+
+echo "PSD VM runtime probe: fractional-scale characterization begin scale=1.5"
+set_monitor_scale 1.5
+PSD_RENDER_PROBE_BACKEND=dedicated \
+    bash "$(dirname "$0")/probe-vm-render-transform.sh" "$test_client_path" "$PLUGIN_PATH"
+echo "PSD VM runtime probe: fractional-scale characterization PASS scale=1.5"
+
+set_monitor_scale "$original_monitor_scale"
+echo "PSD VM runtime probe: monitor scale restored to $original_monitor_scale"
+
 bash "$(dirname "$0")/probe-vm-workspace-animation.sh" "$test_client_path" "$PLUGIN_PATH"
 
 PSD_PROBE_TEST_CLIENT="$test_client_path" \
