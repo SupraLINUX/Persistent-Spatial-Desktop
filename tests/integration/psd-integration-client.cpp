@@ -70,12 +70,22 @@ int main(int argc, char *argv[])
         QStringLiteral("Solid popup color used by render probes."),
         QStringLiteral("color"),
         QStringLiteral("#16f27a"));
+    const QCommandLineOption subsurfaceOption(
+        QStringLiteral("subsurface"),
+        QStringLiteral("Create a deterministic native child surface for compositor probes."));
+    const QCommandLineOption subsurfaceColorOption(
+        QStringLiteral("subsurface-color"),
+        QStringLiteral("Solid native child-surface color used by render probes."),
+        QStringLiteral("color"),
+        QStringLiteral("#16f27a"));
 
     parser.addOption(titleOption);
     parser.addOption(colorOption);
     parser.addOption(fullscreenOption);
     parser.addOption(popupOption);
     parser.addOption(popupColorOption);
+    parser.addOption(subsurfaceOption);
+    parser.addOption(subsurfaceColorOption);
     parser.process(app);
 
     const QColor color(parser.value(colorOption));
@@ -87,6 +97,12 @@ int main(int argc, char *argv[])
     const QColor popupColor(parser.value(popupColorOption));
     if (parser.isSet(popupOption) && !popupColor.isValid()) {
         qCritical("Invalid --popup-color value");
+        return EXIT_FAILURE;
+    }
+
+    const QColor subsurfaceColor(parser.value(subsurfaceColorOption));
+    if (parser.isSet(subsurfaceOption) && !subsurfaceColor.isValid()) {
+        qCritical("Invalid --subsurface-color value");
         return EXIT_FAILURE;
     }
 
@@ -114,6 +130,24 @@ int main(int argc, char *argv[])
             popup->move(window.mapToGlobal(QPoint(96, 96)));
             popup->show();
             popup->raise();
+        });
+    }
+
+    if (parser.isSet(subsurfaceOption)) {
+        auto *subsurface = new SolidWindow(
+            subsurfaceColor,
+            &window,
+            Qt::SubWindow | Qt::FramelessWindowHint);
+        subsurface->setAttribute(Qt::WA_NativeWindow);
+        subsurface->resize(220, 140);
+        subsurface->move(96, 96);
+
+        // Forcing a native child window on Qt Wayland gives the probe an
+        // independent wl_surface parented through wl_subcompositor. Delay its
+        // creation until the toplevel has settled to deterministic geometry.
+        QTimer::singleShot(1200, subsurface, [subsurface] {
+            subsurface->show();
+            subsurface->raise();
         });
     }
 

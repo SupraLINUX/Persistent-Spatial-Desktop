@@ -239,3 +239,24 @@ direct-scanout behavior.
 Newer upstream `main` contains additional transformer/effects infrastructure,
 but PSD does not design against moving `main`. It can be reconsidered only
 after that infrastructure exists in a pinned stable tag.
+
+
+### Dedicated popup characterization checkpoint — CI #225
+
+The dedicated backend now has explicit `xdg_popup` evidence rather than an
+inference from `renderWindow()` call structure.
+
+The Ubuntu 26.04 QEMU probe creates a deterministic Qt transient, confirms
+`xdg_popup` creation from the Wayland protocol trace, and tracks only the
+popup's exact solid-color pixels. With a 96 logical-unit PSD offset the popup
+translated by 96 physical pixels at scale 1.0 with overlap 1.000, while the
+toplevel logical geometry remained unchanged. Reset returned the popup to a
+0-pixel translation with overlap 1.000.
+
+Therefore popup composition is validated for the current dedicated
+`renderWindow()` POC on Hyprland 0.53.3. This does not imply that
+`IWindowTransformer` on Hyprland v0.56.2 has equivalent behavior; upstream
+explicitly excludes popups from that transformer path.
+
+Subsurface behavior remains a separate requirement and must be proven with an
+actual `wl_subsurface` before promotion.
