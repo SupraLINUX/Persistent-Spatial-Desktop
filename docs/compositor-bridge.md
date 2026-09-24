@@ -260,3 +260,25 @@ explicitly excludes popups from that transformer path.
 
 Subsurface behavior remains a separate requirement and must be proven with an
 actual `wl_subsurface` before promotion.
+
+
+### Dedicated subsurface characterization checkpoint — CI #226
+
+The dedicated backend now also has explicit `wl_subsurface` evidence.
+
+The Ubuntu 26.04 QEMU probe forces a native Qt child window, confirms
+`wl_subcompositor.get_subsurface` in the Wayland protocol trace, and follows
+only that child surface's deterministic solid-color pixels. With a 96
+logical-unit PSD offset, the subsurface translated by 96 physical pixels at
+scale 1.0 with overlap 1.000. Reset returned it to a 0-pixel translation with
+overlap 1.000, while the parent toplevel's logical geometry remained unchanged.
+
+This validates subsurface composition for the current dedicated
+`renderWindow()` POC on the Ubuntu 26.04 Hyprland target. Popup and subsurface
+behavior are therefore both proven by protocol-aware pixel tests rather than
+inferred from renderer call structure.
+
+Compositor-owned decorations remain a separate requirement. The next
+characterization uses a deterministic Hyprland border color that does not occur
+in the client surface and correlates those border pixels independently from the
+window contents.

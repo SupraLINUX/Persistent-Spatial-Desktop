@@ -306,6 +306,88 @@ print(
 PY
 }
 
+
+assert_decoration_translation() {
+    local baseline="$1"
+    local candidate="$2"
+    local expected_dx="$3"
+    local label="$4"
+
+    python3 - "$baseline" "$candidate" "$expected_dx" "$label" <<'PY'
+from PIL import Image
+import sys
+
+baseline_path, candidate_path = sys.argv[1], sys.argv[2]
+expected_dx = int(sys.argv[3])
+label = sys.argv[4]
+target = (255, 0, 255)
+
+def points(path):
+    image = Image.open(path).convert("RGB")
+    width, height = image.size
+    pixels = image.load()
+    result = set()
+
+    for y in range(height):
+        for x in range(width):
+            r, g, b = pixels[x, y]
+            if (
+                abs(r - target[0]) <= 6
+                and abs(g - target[1]) <= 6
+                and abs(b - target[2]) <= 6
+            ):
+                result.add((x, y))
+
+    if len(result) < 500:
+        raise SystemExit(
+            f"{label}: too few compositor-border pixels ({len(result)}) in {path}"
+        )
+    return result
+
+baseline = points(baseline_path)
+candidate = points(candidate_path)
+
+def bbox(points_set):
+    xs = [x for x, _ in points_set]
+    ys = [y for _, y in points_set]
+    return (min(xs), min(ys), max(xs), max(ys))
+
+best_dx = None
+best_overlap = -1
+
+for dx in range(-224, 225):
+    overlap = sum((x + dx, y) in candidate for x, y in baseline)
+    if overlap > best_overlap:
+        best_overlap = overlap
+        best_dx = dx
+
+overlap_ratio = best_overlap / max(1, min(len(baseline), len(candidate)))
+
+print(
+    f"PSD render probe: {label} decoration diagnostic "
+    f"baselineBBox={bbox(baseline)} candidateBBox={bbox(candidate)} "
+    f"baselinePixels={len(baseline)} candidatePixels={len(candidate)}"
+)
+
+if abs(best_dx - expected_dx) > 3:
+    raise SystemExit(
+        f"{label}: expected compositor-border translation {expected_dx}, "
+        f"best correlation was {best_dx} (overlap={overlap_ratio:.3f})"
+    )
+
+if overlap_ratio < 0.65:
+    raise SystemExit(
+        f"{label}: weak compositor-border correlation "
+        f"{overlap_ratio:.3f} at dx={best_dx}"
+    )
+
+print(
+    f"PSD render probe: {label} decoration pixel translation "
+    f"{best_dx}px (overlap={overlap_ratio:.3f}) PASS"
+)
+PY
+}
+
 run_case() {
     local mode="$1"
     local target_title="psd-render-$mode-$$"
@@ -989,10 +1071,153 @@ PY
     echo "PSD render probe: wl_subsurface pixel evidence PASS backend=$RENDER_BACKEND"
 }
 
+
+run_decoration_case() {
+    if [[ "$RENDER_BACKEND" != "dedicated" ]]; then
+        return
+    fi
+
+    local mode="compositor-decoration"
+    local target_title="psd-render-$mode-$$"
+    local target_pid=""
+    local baseline="$work_dir/$mode-baseline.png"
+    local shifted="$work_dir/$mode-shifted.png"
+    local restored="$work_dir/$mode-restored.png"
+
+    reset_transform | grep -qx "ok"
+
+    "$CLIENT_PATH" \
+        --title "$target_title" \
+        --color "#334a88" \
+        >"$work_dir/$mode-client.log" 2>&1 &
+    target_pid=$!
+    client_pids+=("$target_pid")
+
+    if ! wait_for_client "$target_title" 0 0; then
+        echo "PSD render probe: decoration target did not map tiled." >&2
+        hyprctl -j clients >&2 || true
+        exit 1
+    fi
+
+    hyprctl dispatch focuswindow "title:^$target_title$" | grep -qx "ok"
+    hyprctl dispatch togglefloating active | grep -qx "ok"
+    hyprctl dispatch resizeactive "exact 480 320" | grep -qx "ok"
+    hyprctl dispatch centerwindow | grep -qx "ok"
+
+    if ! wait_for_client "$target_title" 1 0; then
+        echo "PSD render probe: decoration target did not become floating." >&2
+        hyprctl -j clients >&2 || true
+        exit 1
+    fi
+
+    local geometry_ready=0
+    local geometry_now=""
+    for _ in $(seq 1 60); do
+        geometry_now="$(client_geometry "$target_title" || true)"
+        if python3 - "$geometry_now" <<'PY' >/dev/null 2>&1
+import sys
+if not sys.argv[1]:
+    raise SystemExit(1)
+_, _, w, h = map(int, sys.argv[1].split(","))
+raise SystemExit(0 if abs(w - 480) <= 4 and abs(h - 320) <= 4 else 1)
+PY
+        then
+            geometry_ready=1
+            break
+        fi
+        sleep 0.1
+    done
+
+    if [[ "$geometry_ready" != "1" ]]; then
+        echo "PSD render probe: decoration target geometry did not settle." >&2
+        hyprctl -j clients >&2 || true
+        exit 1
+    fi
+
+    # The top-level paints only blue. Magenta therefore comes exclusively
+    # from the deterministic Hyprland border configured by the headless test
+    # session, giving us compositor-owned decoration pixels to correlate.
+    sleep 0.2
+
+    local geometry_before
+    geometry_before="$(client_geometry "$target_title")"
+
+    local logical_offset=96
+    local physical_offset
+    physical_offset="$(
+        python3 - "$logical_offset" "$monitor_scale" <<'PY'
+import sys
+print(round(float(sys.argv[1]) * float(sys.argv[2])))
+PY
+    )"
+
+    capture_output "$baseline"
+    assert_decoration_translation "$baseline" "$baseline" 0 "$mode baseline"
+
+    apply_transform "$logical_offset" | grep -qx "ok"
+    sleep 0.2
+
+    local compositor_state
+    compositor_state="$(hyprctl -j psd-plugin-state)"
+    python3 - "$compositor_state" "$monitor_name" "$logical_offset" <<'PY'
+import json
+import sys
+
+state = json.loads(sys.argv[1])
+monitor = sys.argv[2]
+expected = float(sys.argv[3])
+entries = [
+    item for item in state.get("dedicatedPresentationOffsets", [])
+    if item.get("monitor") == monitor
+]
+if len(entries) != 1:
+    raise SystemExit(
+        f"PSD render probe: decoration unexpected dedicated transform state: {state}"
+    )
+entry = entries[0]
+if abs(float(entry.get("x", 0.0)) - expected) > 0.01:
+    raise SystemExit(
+        f"PSD render probe: decoration wrong dedicated x offset: {entry}"
+    )
+if abs(float(entry.get("y", 0.0))) > 0.01:
+    raise SystemExit(
+        f"PSD render probe: decoration wrong dedicated y offset: {entry}"
+    )
+PY
+
+    local geometry_shifted
+    geometry_shifted="$(client_geometry "$target_title")"
+    if [[ "$geometry_shifted" != "$geometry_before" ]]; then
+        echo "PSD render probe: decoration target logical geometry changed under render-only offset." >&2
+        echo "before=$geometry_before shifted=$geometry_shifted" >&2
+        exit 1
+    fi
+
+    capture_output "$shifted"
+    assert_decoration_translation "$baseline" "$shifted" "$physical_offset" "$mode"
+
+    reset_transform | grep -qx "ok"
+    sleep 0.2
+    capture_output "$restored"
+    assert_decoration_translation "$baseline" "$restored" 0 "$mode reset"
+
+    kill -TERM "$target_pid" >/dev/null 2>&1 || true
+    wait "$target_pid" >/dev/null 2>&1 || true
+    target_pid=""
+
+    if ! wait_for_client_gone "$target_title"; then
+        echo "PSD render probe: decoration target remained in compositor state after exit." >&2
+        exit 1
+    fi
+
+    echo "PSD render probe: compositor decoration pixel evidence PASS backend=$RENDER_BACKEND"
+}
+
 run_case tiled
 run_case floating
 run_case pinned
 run_popup_case
 run_subsurface_case
+run_decoration_case
 
 echo "PSD render probe: tiled/floating/pinned pixel evidence PASS backend=$RENDER_BACKEND"
