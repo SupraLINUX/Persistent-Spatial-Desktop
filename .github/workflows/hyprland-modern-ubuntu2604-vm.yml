@@ -6,6 +6,13 @@ concurrency:
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - experiment/hyprland-0562-ubuntu2604
+    paths:
+      - .github/workflows/hyprland-modern-ubuntu2604-vm.yml
+      - tests/integration/run-qemu-vm.sh
+      - tests/integration/probe-modern-hyprland-coexistence.sh
 
 jobs:
   build-private-runtime:
