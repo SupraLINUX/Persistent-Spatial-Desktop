@@ -150,3 +150,26 @@ The Hyprland plugin also tracks the exact workspace transformed by PSD for each 
 These safeguards reduce residual-offset risk during normal shutdown, workspace changes, monitor teardown and plugin hot unload/reload. QEMU integration also verifies that SIGKILL can leave a residual transform but a subsequent shell start clears it back to CENTER. A compositor crash or machine loss still cannot execute cleanup and remains a separate recovery boundary.
 
 Do not emulate the final spatial transform by repeatedly moving each client window through public dispatchers unless implementation evidence proves there is no better compositor-level path.
+
+
+### Native workspace-animation coexistence characterization
+
+Hyprland 0.53.3's native workspace transition implementation owns the same
+`CWorkspace::m_renderOffset` animated variable used by the current PSD proof of
+concept. The QEMU integration suite therefore contains a dedicated
+`probe-vm-workspace-animation.sh` characterization test.
+
+The probe first enables a deliberately observable native slide transition and
+requires the active workspace's `m_renderOffset` to enter and leave
+`isBeingAnimated()` normally. It then establishes a PSD offset, triggers
+another native workspace transition, and immediately sends the PSD offset to
+the incoming workspace. The plugin records the value/goal it observed *before*
+the PSD write.
+
+At this stage the test is intentionally a characterization test: it succeeds
+when the shared-variable collision is demonstrated. A confirmed collision means
+the current `m_renderOffset` proof of concept cannot be considered a
+production-safe coexistence mechanism for simultaneous PSD displacement and
+native Hyprland workspace animation. The eventual runtime policy must either
+serialize/cancel one motion domain or move PSD to a dedicated compositor-side
+transform that does not reuse Hyprland's workspace-animation variable.

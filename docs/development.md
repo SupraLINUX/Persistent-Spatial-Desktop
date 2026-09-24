@@ -96,7 +96,8 @@ It then connects to Hyprland's documented command and event UNIX sockets.
 - unit tests for tokens, spatial state, responsive geometry, motion authority, Hyprland protocol parsing and compositor reset sequencing;
 - GitHub-hosted Ubuntu 26.04 KVM/QEMU integration with guest DRM/KMS, seatd, Hyprland, the real Qt/Wayland shell and compositor plugin;
 - deterministic Qt/Wayland integration client used to keep workspaces alive, request fullscreen and paint exact solid colors for pixel-level compositor validation;
-- QEMU pixel-evidence probe using `grim` + Pillow to distinguish compositor render translation from logical window geometry for tiled, floating and pinned windows.
+- QEMU pixel-evidence probe using `grim` + Pillow to distinguish compositor render translation from logical window geometry for tiled, floating and pinned windows;
+- QEMU native-workspace-animation characterization that detects whether a PSD command collides with Hyprland's own in-flight `m_renderOffset` animation before either mechanism is promoted to production.
 
 ## Current compositor boundary
 

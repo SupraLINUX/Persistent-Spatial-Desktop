@@ -40,6 +40,16 @@ struct MonitorTransformState
     std::vector<PresentationWindowTransform> presentationWindows;
 };
 
+struct NativeWorkspaceAnimationConflict
+{
+    bool valid = false;
+    std::string monitorName;
+    std::string workspaceName;
+    Vector2D actualBefore;
+    Vector2D goalBefore;
+    Vector2D requestedOffset;
+};
+
 HANDLE g_handle = nullptr;
 SP<SHyprCtlCommand> g_capabilitiesCommand;
 SP<SHyprCtlCommand> g_stateCommand;
@@ -54,6 +64,8 @@ bool g_spatialGestureActive = false;
 std::string g_spatialGestureMonitor;
 uint64_t g_nextWorkspaceGeneration = 1;
 uint64_t g_workspaceSwitchResetCount = 0;
+uint64_t g_nativeWorkspaceAnimationConflictCount = 0;
+NativeWorkspaceAnimationConflict g_lastNativeWorkspaceAnimationConflict;
 
 std::string jsonEscape(const std::string &value)
 {
@@ -266,6 +278,18 @@ SDispatchResult setOffset(std::string arguments)
     if (workspace->m_hasFullscreenWindow)
         return {.success = false, .error = "PSD: refusing non-zero render offset while the workspace contains fullscreen content"};
 
+    if (workspace->m_renderOffset && workspace->m_renderOffset->isBeingAnimated()) {
+        ++g_nativeWorkspaceAnimationConflictCount;
+        g_lastNativeWorkspaceAnimationConflict = {
+            .valid = true,
+            .monitorName = monitorName,
+            .workspaceName = workspace->m_name,
+            .actualBefore = workspace->m_renderOffset->value(),
+            .goalBefore = workspace->m_renderOffset->goal(),
+            .requestedOffset = Vector2D{x, y},
+        };
+    }
+
     MonitorTransformState &state = trackWorkspaceForMonitor(monitorName, workspace);
     state.offset = Vector2D{x, y};
     applyOffset(workspace, state.offset);
@@ -402,17 +426,17 @@ void onSwipeEnd(void *, SCallbackInfo &info, std::any parameter)
 std::string capabilitiesResponse(eHyprCtlOutputFormat format, std::string)
 {
     if (format == FORMAT_JSON) {
-        return R"json({"protocolVersion":3,"pluginVersion":"0.1.3","spatialRenderOffsetExperimental":true,"monitorTargeting":true,"fourFingerGestureEventsExperimental":true,"gestureEventsDefaultEnabled":false,"diagnosticStateQueryExperimental":true,"lifecycleEventsExperimental":true,"rigidFloatingNormalizationExperimental":true,"pinnedPresentationOffsetExperimental":true})json";
+        return R"json({"protocolVersion":3,"pluginVersion":"0.1.4","spatialRenderOffsetExperimental":true,"monitorTargeting":true,"fourFingerGestureEventsExperimental":true,"gestureEventsDefaultEnabled":false,"diagnosticStateQueryExperimental":true,"lifecycleEventsExperimental":true,"rigidFloatingNormalizationExperimental":true,"pinnedPresentationOffsetExperimental":true,"nativeWorkspaceAnimationDiagnosticsExperimental":true})json";
     }
 
-    return "protocolVersion=3 pluginVersion=0.1.3 spatialRenderOffsetExperimental=true monitorTargeting=true fourFingerGestureEventsExperimental=true gestureEventsDefaultEnabled=false diagnosticStateQueryExperimental=true lifecycleEventsExperimental=true rigidFloatingNormalizationExperimental=true pinnedPresentationOffsetExperimental=true";
+    return "protocolVersion=3 pluginVersion=0.1.4 spatialRenderOffsetExperimental=true monitorTargeting=true fourFingerGestureEventsExperimental=true gestureEventsDefaultEnabled=false diagnosticStateQueryExperimental=true lifecycleEventsExperimental=true rigidFloatingNormalizationExperimental=true pinnedPresentationOffsetExperimental=true nativeWorkspaceAnimationDiagnosticsExperimental=true";
 }
 
 std::string stateResponse(eHyprCtlOutputFormat format, std::string)
 {
     if (format != FORMAT_JSON) {
         return std::format(
-            "trackedTransforms={} touchedWorkspaces={} trackedPresentationWindows={} workspaceSwitchResetCount={} gestureEventsEnabled={} gestureActive={}",
+            "trackedTransforms={} touchedWorkspaces={} trackedPresentationWindows={} workspaceSwitchResetCount={} nativeWorkspaceAnimationConflictCount={} gestureEventsEnabled={} gestureActive={}",
             g_monitorTransforms.size(),
             g_touchedWorkspaces.size(),
             std::accumulate(
@@ -423,6 +447,7 @@ std::string stateResponse(eHyprCtlOutputFormat format, std::string)
                     return count + entry.second.presentationWindows.size();
                 }),
             g_workspaceSwitchResetCount,
+            g_nativeWorkspaceAnimationConflictCount,
             g_gestureEventsEnabled ? "true" : "false",
             g_spatialGestureActive ? "true" : "false");
     }
@@ -492,8 +517,51 @@ std::string stateResponse(eHyprCtlOutputFormat format, std::string)
         }
     }
 
+    std::string activeWorkspaceAnimations;
+    first = true;
+
+    for (const auto &monitor : g_pCompositor->m_monitors) {
+        if (!monitor || !monitor->m_activeWorkspace
+            || !monitor->m_activeWorkspace->m_renderOffset) {
+            continue;
+        }
+
+        const auto workspace = monitor->m_activeWorkspace;
+        const Vector2D actual = workspace->m_renderOffset->value();
+        const Vector2D goal = workspace->m_renderOffset->goal();
+
+        if (!first)
+            activeWorkspaceAnimations += ',';
+        first = false;
+
+        activeWorkspaceAnimations += std::format(
+            R"json({{"monitor":"{}","workspace":"{}","actualX":{:.6f},"actualY":{:.6f},"goalX":{:.6f},"goalY":{:.6f},"animated":{}}})json",
+            jsonEscape(monitor->m_name),
+            jsonEscape(workspace->m_name),
+            actual.x,
+            actual.y,
+            goal.x,
+            goal.y,
+            workspace->m_renderOffset->isBeingAnimated() ? "true" : "false");
+    }
+
+    std::string lastNativeConflict = "null";
+    if (g_lastNativeWorkspaceAnimationConflict.valid) {
+        const auto &conflict = g_lastNativeWorkspaceAnimationConflict;
+        lastNativeConflict = std::format(
+            R"json({{"monitor":"{}","workspace":"{}","actualBeforeX":{:.6f},"actualBeforeY":{:.6f},"goalBeforeX":{:.6f},"goalBeforeY":{:.6f},"requestedX":{:.6f},"requestedY":{:.6f}}})json",
+            jsonEscape(conflict.monitorName),
+            jsonEscape(conflict.workspaceName),
+            conflict.actualBefore.x,
+            conflict.actualBefore.y,
+            conflict.goalBefore.x,
+            conflict.goalBefore.y,
+            conflict.requestedOffset.x,
+            conflict.requestedOffset.y);
+    }
+
     return std::format(
-        R"json({{"trackedTransforms":[{}],"touchedWorkspaceCount":{},"trackedPresentationWindowCount":{},"presentationOffsets":[{}],"workspaceSwitchResetCount":{},"gestureEventsEnabled":{},"gestureActive":{}}})json",
+        R"json({{"trackedTransforms":[{}],"touchedWorkspaceCount":{},"trackedPresentationWindowCount":{},"presentationOffsets":[{}],"workspaceSwitchResetCount":{},"activeWorkspaceAnimations":[{}],"nativeWorkspaceAnimationConflictCount":{},"lastNativeWorkspaceAnimationConflict":{},"gestureEventsEnabled":{},"gestureActive":{}}})json",
         transforms,
         g_touchedWorkspaces.size(),
         std::accumulate(
@@ -505,6 +573,9 @@ std::string stateResponse(eHyprCtlOutputFormat format, std::string)
             }),
         presentationOffsets,
         g_workspaceSwitchResetCount,
+        activeWorkspaceAnimations,
+        g_nativeWorkspaceAnimationConflictCount,
+        lastNativeConflict,
         g_gestureEventsEnabled ? "true" : "false",
         g_spatialGestureActive ? "true" : "false");
 }
@@ -589,7 +660,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle)
         "psd-hyprland-plugin",
         "Persistent Spatial Desktop compositor integration experiment",
         "SupraLINUX",
-        "0.1.3",
+        "0.1.4",
     };
 }
 
