@@ -6,6 +6,16 @@ work_dir="${RUNNER_TEMP:-${TMPDIR:-/tmp}}/psd-qemu-vm"
 image_cache="${PSD_VM_IMAGE_CACHE:-${HOME}/.cache/psd-vm/ubuntu-26.04-minimal-cloudimg-amd64.img}"
 image_url="${PSD_VM_IMAGE_URL:-https://cloud-images.ubuntu.com/minimal/releases/resolute/release-20260827/ubuntu-26.04-minimal-cloudimg-amd64.img}"
 ssh_port="${PSD_VM_SSH_PORT:-2222}"
+modern_hyprland_archive="${PSD_MODERN_HYPRLAND_ARCHIVE:-}"
+modern_hyprland_mode=0
+
+if [[ -n "$modern_hyprland_archive" ]]; then
+    if [[ ! -f "$modern_hyprland_archive" ]]; then
+        echo "PSD QEMU probe: modern Hyprland archive not found: $modern_hyprland_archive" >&2
+        exit 1
+    fi
+    modern_hyprland_mode=1
+fi
 
 for command in qemu-system-x86_64 qemu-img cloud-localds curl sha256sum ssh ssh-keygen tar; do
     if ! command -v "$command" >/dev/null 2>&1; then
@@ -107,7 +117,11 @@ fi
 echo "PSD QEMU probe: Ubuntu image SHA256 PASS ($expected_image_sha256)"
 
 cp --reflink=auto "$image_cache" "$disk_image" 2>/dev/null     || cp "$image_cache" "$disk_image"
-qemu-img resize "$disk_image" 12G >/dev/null
+if [[ "$modern_hyprland_mode" == "1" ]]; then
+    qemu-img resize "$disk_image" 20G >/dev/null
+else
+    qemu-img resize "$disk_image" 12G >/dev/null
+fi
 
 ssh-keygen -q -t ed25519 -N '' -f "$ssh_key"
 
@@ -266,6 +280,61 @@ ssh_guest '
         xdg-desktop-portal-hyprland
 '
 
+if [[ "$modern_hyprland_mode" == "1" ]]; then
+    echo "PSD QEMU probe: installing representative Ubuntu applications"
+    ssh_guest '
+        set -e
+        sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            dbus-daemon \
+            dolphin \
+            nautilus
+        sudo apt-get check
+        sudo dpkg --audit
+    '
+
+    echo "PSD QEMU probe: installing private Hyprland runtime under /opt/psd-hyprland"
+    cat "$modern_hyprland_archive" | ssh "${ssh_options[@]}" psd@127.0.0.1 \
+        'cat > /home/psd/hyprland-modern-runtime.tar.gz'
+    ssh_guest '
+        set -euo pipefail
+        sudo rm -rf /opt/psd-hyprland
+        sudo mkdir -p /opt/psd-hyprland
+        sudo tar -xzf /home/psd/hyprland-modern-runtime.tar.gz -C /opt/psd-hyprland
+        sudo chown -R root:root /opt/psd-hyprland
+
+        test -x /opt/psd-hyprland/bin/Hyprland
+        test -x /opt/psd-hyprland/bin/hyprctl
+
+        env LD_LIBRARY_PATH=/opt/psd-hyprland/lib \
+            /opt/psd-hyprland/bin/Hyprland --version
+
+        env LD_LIBRARY_PATH=/opt/psd-hyprland/lib \
+            ldd /opt/psd-hyprland/bin/Hyprland \
+            | tee /home/psd/hyprland-modern-ldd.txt
+
+        if grep -q "not found" /home/psd/hyprland-modern-ldd.txt; then
+            echo "PSD QEMU probe: private Hyprland has unresolved runtime libraries" >&2
+            exit 1
+        fi
+
+        wayland_line="$(grep "libwayland-server.so" /home/psd/hyprland-modern-ldd.txt | head -n1 || true)"
+        if [[ -z "$wayland_line" || "$wayland_line" == *"/opt/psd-hyprland/"* ]]; then
+            echo "PSD QEMU probe: Hyprland did not resolve Wayland runtime from Ubuntu" >&2
+            cat /home/psd/hyprland-modern-ldd.txt >&2
+            exit 1
+        fi
+
+        for app in /usr/bin/dolphin /usr/bin/nautilus; do
+            if env -u LD_LIBRARY_PATH ldd "$app" 2>/dev/null | grep -q "/opt/psd-hyprland/"; then
+                echo "PSD QEMU probe: Ubuntu app unexpectedly resolves private Hyprland libraries: $app" >&2
+                exit 1
+            fi
+        done
+
+        echo "PSD QEMU probe: private runtime isolation PASS"
+    '
+fi
+
 echo "PSD QEMU probe: guest kernel/DRM state"
 ssh_guest '
     uname -a
@@ -281,6 +350,7 @@ ssh_guest '
 echo "PSD QEMU probe: copying current checkout into guest"
 tar     --exclude=.git     --exclude=build     --exclude=build-hypr     --exclude=build-plugin     -C "$repo_root"     -cf - .     | ssh "${ssh_options[@]}" psd@127.0.0.1         'rm -rf /home/psd/src && mkdir -p /home/psd/src && tar -xf - -C /home/psd/src'
 
+if [[ "$modern_hyprland_mode" != "1" ]]; then
 echo "PSD QEMU probe: building PSD inside Ubuntu 26.04 guest"
 ssh_guest '
     set -e
@@ -293,6 +363,7 @@ ssh_guest '
     cmake -S . -B build-hypr -G Ninja         -DCMAKE_BUILD_TYPE=Debug         -DPSD_BUILD_SHELL=OFF         -DPSD_BUILD_HYPRLAND_PLUGIN=ON         -DBUILD_TESTING=OFF
     cmake --build build-hypr --target psd-hyprland-plugin --parallel 2
 '
+fi
 
 echo "PSD QEMU probe: starting seatd for native guest DRM/KMS"
 ssh_guest '
@@ -340,6 +411,23 @@ ssh_guest '
     id
     ls -l /run/seatd.sock /dev/dri /dev/input/event* 2>/dev/null || true
 '
+
+if [[ "$modern_hyprland_mode" == "1" ]]; then
+    echo "PSD QEMU probe: running private Hyprland with stock Ubuntu applications"
+    ssh_guest '
+        set -euo pipefail
+        cd /home/psd/src
+        export LIBSEAT_BACKEND=seatd
+        export SEATD_VTBOUND=0
+        unset WAYLAND_DISPLAY
+        unset DISPLAY
+        bash tests/integration/probe-modern-hyprland-coexistence.sh \
+            /opt/psd-hyprland \
+            tests/integration/hyprland-headless.conf
+    '
+    echo "PSD QEMU modern Hyprland coexistence probe: PASS"
+    exit 0
+fi
 
 echo "PSD QEMU probe: running Hyprland on native virtio DRM/KMS inside VM"
 ssh_guest '
