@@ -1381,7 +1381,7 @@ run_damage_case() {
     fi
 
     local mode="damage"
-    local target_title="psd-render-$mode-$"
+    local target_title="psd-render-${mode}-${BASHPID}"
     local target_pid=""
     local baseline="$work_dir/$mode-baseline.png"
     local shifted="$work_dir/$mode-shifted.png"

@@ -343,3 +343,15 @@ JSON state; under `set -e` the command substitution terminated the probe.
 
 The helper now captures `psd-plugin-state` first and passes the JSON to Python
 as an explicit argument. No compositor/backend behavior changed in this fix.
+
+
+#### Damage probe harness correction — CI #230
+
+CI #230 also exited before reaching any damage assertion. The dedicated damage
+case accidentally constructed its title as `psd-render-$mode-$`. The trailing
+literal dollar sign then became an end-of-string regex anchor when the title
+was reused by `focuswindow`, so the focus dispatcher did not match the actual
+client and `set -e` terminated the probe.
+
+The test now uses `psd-render-${mode}-${BASHPID}`, giving the client a
+regex-safe unique title. No compositor/backend code changed in this correction.
