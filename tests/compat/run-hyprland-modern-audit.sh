@@ -8,9 +8,10 @@ REPORT_DIR="$ROOT/report"
 SRC_DIR="$ROOT/src"
 BUILD_DIR="$ROOT/build"
 PREFIX="$ROOT/prefix"
+TOOLS_PREFIX="$ROOT/tools-prefix"
 
 rm -rf "$ROOT"
-mkdir -p "$REPORT_DIR" "$SRC_DIR" "$BUILD_DIR" "$PREFIX"
+mkdir -p "$REPORT_DIR" "$SRC_DIR" "$BUILD_DIR" "$PREFIX" "$TOOLS_PREFIX"
 
 exec > >(tee "$REPORT_DIR/full-audit.log") 2>&1
 
@@ -117,10 +118,47 @@ build_component() {
   return 0
 }
 
+build_wayland_toolchain_overlay() {
+  local version="1.25.0"
+  local src="$SRC_DIR/wayland-$version"
+  local build="$BUILD_DIR/wayland-$version"
+
+  section "Build-only toolchain: Wayland $version scanner"
+
+  rm -rf "$src" "$build"
+  if ! git clone --quiet --depth 1 --branch "$version" \
+      https://gitlab.freedesktop.org/wayland/wayland.git "$src"; then
+    printf 'clone failed: wayland %s\n' "$version" | tee "$REPORT_DIR/wayland-toolchain.failure"
+    return 1
+  fi
+
+  if ! meson setup "$build" "$src" \
+      --prefix="$TOOLS_PREFIX" \
+      --libdir=lib \
+      -Ddocumentation=false \
+      -Dtests=false \
+      >"$REPORT_DIR/wayland-toolchain-configure.log" 2>&1; then
+    cat "$REPORT_DIR/wayland-toolchain-configure.log"
+    return 1
+  fi
+
+  if ! meson compile -C "$build" >"$REPORT_DIR/wayland-toolchain-build.log" 2>&1 ||
+     ! meson install -C "$build" >"$REPORT_DIR/wayland-toolchain-install.log" 2>&1; then
+    cat "$REPORT_DIR/wayland-toolchain-build.log" 2>/dev/null || true
+    cat "$REPORT_DIR/wayland-toolchain-install.log" 2>/dev/null || true
+    return 1
+  fi
+
+  "$TOOLS_PREFIX/bin/wayland-scanner" --version > "$REPORT_DIR/wayland-toolchain-version.txt" 2>&1 || true
+  printf 'PASS\n' | tee "$REPORT_DIR/wayland-toolchain.result"
+  return 0
+}
 build_wayland_protocols_overlay() {
   local version="1.49"
   local src="$SRC_DIR/wayland-protocols-$version"
   local build="$BUILD_DIR/wayland-protocols-$version"
+  local saved_path="$PATH"
+  local saved_pkg_config_path="${PKG_CONFIG_PATH:-}"
 
   section "Build-only overlay: wayland-protocols $version"
 
@@ -131,18 +169,28 @@ build_wayland_protocols_overlay() {
     return 1
   fi
 
+  export PATH="$TOOLS_PREFIX/bin:$PATH"
+  export PKG_CONFIG_PATH="$TOOLS_PREFIX/lib/pkgconfig:$TOOLS_PREFIX/share/pkgconfig:${PKG_CONFIG_PATH:-}"
+
   if ! meson setup "$build" "$src" \
       --prefix="$PREFIX" \
       --libdir=lib \
       >"$REPORT_DIR/wayland-protocols-configure.log" 2>&1; then
     cat "$REPORT_DIR/wayland-protocols-configure.log"
+    export PATH="$saved_path"
+    export PKG_CONFIG_PATH="$saved_pkg_config_path"
     return 1
   fi
 
   if ! meson install -C "$build" >"$REPORT_DIR/wayland-protocols-install.log" 2>&1; then
     cat "$REPORT_DIR/wayland-protocols-install.log"
+    export PATH="$saved_path"
+    export PKG_CONFIG_PATH="$saved_pkg_config_path"
     return 1
   fi
+
+  export PATH="$saved_path"
+  export PKG_CONFIG_PATH="$saved_pkg_config_path"
 
   find "$PREFIX" -maxdepth 5 \( -type f -o -type l \) | grep -E "wayland-protocols|pkgconfig/wayland-protocols\.pc" | sort > "$REPORT_DIR/wayland-protocols-overlay-files.txt" || true
   printf 'PASS\n' | tee "$REPORT_DIR/wayland-protocols.result"
@@ -333,7 +381,11 @@ isolated_stack_status="pass"
 
 # v0.56.2 flake.lock is the compatibility reference for the Hypr ecosystem.
 # Use the exact revisions upstream shipped together instead of arbitrary minima.
-if ! build_wayland_protocols_overlay; then
+# Wayland 1.25 is used only as a private build-tool provider for protocol 1.49.
+# Runtime linking is intentionally returned to Ubuntu 26.04 Wayland afterwards.
+if ! build_wayland_toolchain_overlay; then
+  isolated_stack_status="fail:wayland-toolchain-overlay"
+elif ! build_wayland_protocols_overlay; then
   isolated_stack_status="fail:wayland-protocols-overlay"
 fi
 
@@ -466,6 +518,9 @@ section "Generate summary"
   echo "- Stock build: **$stock_build_status**"
   echo "- Isolated Hypr stack: **$isolated_stack_status**"
   echo "- Hyprland with isolated Hypr stack: **$isolated_hyprland_status**"
+  if [[ -f "$REPORT_DIR/wayland-toolchain-version.txt" ]]; then
+    echo "- Private build scanner: **$(cat "$REPORT_DIR/wayland-toolchain-version.txt" | head -n 1)**"
+  fi
   echo "- Representative Ubuntu APT simulation: **$resolver_status**"
   echo "- Packages APT wanted to remove in representative simulation: **$resolver_removals**"
   echo
