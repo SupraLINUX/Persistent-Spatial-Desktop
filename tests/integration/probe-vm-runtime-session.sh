@@ -167,10 +167,8 @@ if [[ ! -x "$test_client_path" ]]; then
     exit 1
 fi
 
-PSD_HYPRLAND_LOG_FILE="$log_file" \
 PSD_RENDER_PROBE_BACKEND=legacy \
     bash "$(dirname "$0")/probe-vm-render-transform.sh" "$test_client_path" "$PLUGIN_PATH"
-PSD_HYPRLAND_LOG_FILE="$log_file" \
 PSD_RENDER_PROBE_BACKEND=dedicated \
     bash "$(dirname "$0")/probe-vm-render-transform.sh" "$test_client_path" "$PLUGIN_PATH"
 bash "$(dirname "$0")/probe-vm-workspace-animation.sh" "$test_client_path" "$PLUGIN_PATH"

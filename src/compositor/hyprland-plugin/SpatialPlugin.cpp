@@ -66,10 +66,13 @@ SP<SHyprCtlCommand> g_stateCommand;
 SP<HOOK_CALLBACK_FN> g_swipeBeginCallback;
 SP<HOOK_CALLBACK_FN> g_swipeUpdateCallback;
 SP<HOOK_CALLBACK_FN> g_swipeEndCallback;
+SP<HOOK_CALLBACK_FN> g_preRenderCallback;
 CFunctionHook *g_renderWindowHook = nullptr;
 RenderWindowHookFn g_originalRenderWindow = nullptr;
 bool g_dedicatedPresentationAvailable = false;
 std::unordered_map<std::string, Vector2D> g_dedicatedMonitorOffsets;
+std::unordered_map<std::string, uint64_t> g_dedicatedDamageRequestCounts;
+std::unordered_map<std::string, uint64_t> g_monitorRenderCounts;
 std::vector<PHLWORKSPACEREF> g_touchedWorkspaces;
 std::unordered_map<std::string, MonitorTransformState> g_monitorTransforms;
 
@@ -192,11 +195,23 @@ bool installDedicatedPresentationHook()
     return true;
 }
 
+void onPreRender(void *, SCallbackInfo &, std::any parameter)
+{
+    const auto monitor = std::any_cast<PHLMONITOR>(&parameter);
+    if (!monitor || !*monitor)
+        return;
+
+    ++g_monitorRenderCounts[(*monitor)->m_name];
+}
+
 void damageDedicatedMonitor(const std::string &monitorName)
 {
     const auto monitor = g_pCompositor->getMonitorFromName(monitorName);
-    if (monitor)
-        g_pHyprRenderer->damageMonitor(monitor);
+    if (!monitor)
+        return;
+
+    ++g_dedicatedDamageRequestCounts[monitorName];
+    g_pHyprRenderer->damageMonitor(monitor);
 }
 
 SDispatchResult setDedicatedPresentationOffset(std::string arguments)
@@ -241,7 +256,7 @@ SDispatchResult setDedicatedPresentationOffset(std::string arguments)
     else
         g_dedicatedMonitorOffsets[monitorName] = offset;
 
-    g_pHyprRenderer->damageMonitor(monitor);
+    damageDedicatedMonitor(monitorName);
     return {};
 }
 
@@ -746,6 +761,34 @@ std::string stateResponse(eHyprCtlOutputFormat format, std::string)
             offset.y);
     }
 
+    std::string dedicatedDamageRequests;
+    first = true;
+
+    for (const auto &[monitorName, count] : g_dedicatedDamageRequestCounts) {
+        if (!first)
+            dedicatedDamageRequests += ',';
+        first = false;
+
+        dedicatedDamageRequests += std::format(
+            R"json({{"monitor":"{}","count":{}}})json",
+            jsonEscape(monitorName),
+            count);
+    }
+
+    std::string monitorRenderCounts;
+    first = true;
+
+    for (const auto &[monitorName, count] : g_monitorRenderCounts) {
+        if (!first)
+            monitorRenderCounts += ',';
+        first = false;
+
+        monitorRenderCounts += std::format(
+            R"json({{"monitor":"{}","count":{}}})json",
+            jsonEscape(monitorName),
+            count);
+    }
+
     std::string activeWorkspaceAnimations;
     first = true;
 
@@ -790,7 +833,7 @@ std::string stateResponse(eHyprCtlOutputFormat format, std::string)
     }
 
     return std::format(
-        R"json({{"trackedTransforms":[{}],"touchedWorkspaceCount":{},"trackedPresentationWindowCount":{},"presentationOffsets":[{}],"workspaceSwitchResetCount":{},"dedicatedPresentationOffsets":[{}],"activeWorkspaceAnimations":[{}],"nativeWorkspaceAnimationConflictCount":{},"lastNativeWorkspaceAnimationConflict":{},"gestureEventsEnabled":{},"gestureActive":{}}})json",
+        R"json({{"trackedTransforms":[{}],"touchedWorkspaceCount":{},"trackedPresentationWindowCount":{},"presentationOffsets":[{}],"workspaceSwitchResetCount":{},"dedicatedPresentationOffsets":[{}],"dedicatedDamageRequests":[{}],"monitorRenderCounts":[{}],"activeWorkspaceAnimations":[{}],"nativeWorkspaceAnimationConflictCount":{},"lastNativeWorkspaceAnimationConflict":{},"gestureEventsEnabled":{},"gestureActive":{}}})json",
         transforms,
         g_touchedWorkspaces.size(),
         std::accumulate(
@@ -803,6 +846,8 @@ std::string stateResponse(eHyprCtlOutputFormat format, std::string)
         presentationOffsets,
         g_workspaceSwitchResetCount,
         dedicatedPresentationOffsets,
+        dedicatedDamageRequests,
+        monitorRenderCounts,
         activeWorkspaceAnimations,
         g_nativeWorkspaceAnimationConflictCount,
         lastNativeConflict,
@@ -843,6 +888,8 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle)
     if (serverHash != clientHash)
         throw std::runtime_error("PSD Hyprland plugin ABI mismatch");
 
+    g_dedicatedDamageRequestCounts.clear();
+    g_monitorRenderCounts.clear();
     g_dedicatedPresentationAvailable = installDedicatedPresentationHook();
 
     bool success = true;
@@ -879,13 +926,16 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle)
         g_handle, "swipeUpdate", onSwipeUpdate);
     g_swipeEndCallback = HyprlandAPI::registerCallbackDynamic(
         g_handle, "swipeEnd", onSwipeEnd);
+    g_preRenderCallback = HyprlandAPI::registerCallbackDynamic(
+        g_handle, "preRender", onPreRender);
 
     success = success
         && static_cast<bool>(g_capabilitiesCommand)
         && static_cast<bool>(g_stateCommand)
         && static_cast<bool>(g_swipeBeginCallback)
         && static_cast<bool>(g_swipeUpdateCallback)
-        && static_cast<bool>(g_swipeEndCallback);
+        && static_cast<bool>(g_swipeEndCallback)
+        && static_cast<bool>(g_preRenderCallback);
 
     if (!success)
         throw std::runtime_error("PSD failed to register experimental Hyprland integration");
@@ -918,6 +968,7 @@ APICALL EXPORT void PLUGIN_EXIT()
     g_swipeBeginCallback.reset();
     g_swipeUpdateCallback.reset();
     g_swipeEndCallback.reset();
+    g_preRenderCallback.reset();
 
     if (g_handle) {
         if (g_capabilitiesCommand)

@@ -4,7 +4,6 @@ set -euo pipefail
 CLIENT_PATH="${1:-build/tests/psd-integration-client}"
 PLUGIN_PATH="${2:-build-hypr/src/compositor/hyprland-plugin/psd-hyprland-plugin.so}"
 RENDER_BACKEND="${PSD_RENDER_PROBE_BACKEND:-legacy}"
-HYPRLAND_LOG_FILE="${PSD_HYPRLAND_LOG_FILE:-}"
 
 for command in grim hyprctl python3 realpath; do
     if ! command -v "$command" >/dev/null 2>&1; then
@@ -309,55 +308,75 @@ PY
 
 
 
-monitor_damage_count() {
-    if [[ -z "$HYPRLAND_LOG_FILE" || ! -f "$HYPRLAND_LOG_FILE" ]]; then
-        echo "PSD render probe: Hyprland log unavailable for damage characterization: $HYPRLAND_LOG_FILE" >&2
-        exit 1
-    fi
+state_counter() {
+    local field="$1"
 
-    awk -v marker="Damage: Monitor $monitor_name" '
-        index($0, marker) { count++ }
-        END { print count + 0 }
-    ' "$HYPRLAND_LOG_FILE"
+    hyprctl -j psd-plugin-state | python3 - "$field" "$monitor_name" <<'PY'
+import json
+import sys
+
+state = json.load(sys.stdin)
+field = sys.argv[1]
+monitor = sys.argv[2]
+entry = next(
+    (item for item in state.get(field, []) if item.get("monitor") == monitor),
+    None,
+)
+print(int(entry.get("count", 0)) if entry else 0)
+PY
 }
 
-wait_for_monitor_damage_after() {
-    local before="$1"
-    local label="$2"
+wait_for_counter_after() {
+    local field="$1"
+    local before="$2"
+    local label="$3"
 
     for _ in $(seq 1 80); do
         local now
-        now="$(monitor_damage_count)"
+        now="$(state_counter "$field")"
         if (( now > before )); then
-            echo "PSD render probe: $label native monitor damage PASS count=$before->$now"
+            echo "PSD render probe: $label PASS count=$before->$now"
             return
         fi
         sleep 0.05
     done
 
-    echo "PSD render probe: $label did not reach Hyprland damageMonitor()." >&2
-    tail -n 200 "$HYPRLAND_LOG_FILE" >&2 || true
+    echo "PSD render probe: $label did not advance field=$field before=$before" >&2
+    hyprctl -j psd-plugin-state >&2 || true
     exit 1
 }
 
-assert_no_repeated_monitor_damage() {
-    local before="$1"
+wait_for_counter_quiet() {
+    local field="$1"
     local label="$2"
+    local previous
+    local stable_samples=0
 
-    # A persistent PSD offset is state, not an animation source. Once the
-    # apply-triggered frame settles, the plugin must not request monitor-wide
-    # damage repeatedly while no input/client damage occurs.
-    sleep 0.5
+    previous="$(state_counter "$field")"
 
-    local after
-    after="$(monitor_damage_count)"
-    if [[ "$after" != "$before" ]]; then
-        echo "PSD render probe: $label repeated monitor damage while idle: $before->$after" >&2
-        tail -n 200 "$HYPRLAND_LOG_FILE" >&2 || true
-        exit 1
-    fi
+    # Require a full second with no counter growth. This allows any finite
+    # compositor follow-up work to settle while rejecting a persistent redraw
+    # loop at frequencies >= 1 Hz.
+    for _ in $(seq 1 80); do
+        sleep 0.05
 
-    echo "PSD render probe: $label idle damage stability PASS count=$after"
+        local now
+        now="$(state_counter "$field")"
+        if [[ "$now" == "$previous" ]]; then
+            stable_samples=$((stable_samples + 1))
+            if (( stable_samples >= 20 )); then
+                echo "PSD render probe: $label idle stability PASS count=$now"
+                return
+            fi
+        else
+            previous="$now"
+            stable_samples=0
+        fi
+    done
+
+    echo "PSD render probe: $label did not become idle field=$field last=$previous" >&2
+    hyprctl -j psd-plugin-state >&2 || true
+    exit 1
 }
 
 assert_damage_cleanup() {
@@ -1358,7 +1377,7 @@ run_damage_case() {
     fi
 
     local mode="damage"
-    local target_title="psd-render-$mode-$$"
+    local target_title="psd-render-$mode-$"
     local target_pid=""
     local baseline="$work_dir/$mode-baseline.png"
     local shifted="$work_dir/$mode-shifted.png"
@@ -1429,15 +1448,23 @@ PY
     )"
 
     capture_output "$baseline"
+    wait_for_counter_quiet "monitorRenderCounts" "$mode baseline render"
 
     local damage_before
-    damage_before="$(monitor_damage_count)"
-    apply_transform "$logical_offset" | grep -qx "ok"
-    wait_for_monitor_damage_after "$damage_before" "$mode apply"
+    local render_before
+    damage_before="$(state_counter "dedicatedDamageRequests")"
+    render_before="$(state_counter "monitorRenderCounts")"
 
-    local damage_after_apply
-    damage_after_apply="$(monitor_damage_count)"
-    assert_no_repeated_monitor_damage "$damage_after_apply" "$mode apply"
+    apply_transform "$logical_offset" | grep -qx "ok"
+
+    wait_for_counter_after \
+        "dedicatedDamageRequests" "$damage_before" "$mode apply damage request"
+    wait_for_counter_after \
+        "monitorRenderCounts" "$render_before" "$mode apply compositor frame"
+    wait_for_counter_quiet \
+        "dedicatedDamageRequests" "$mode apply damage requests"
+    wait_for_counter_quiet \
+        "monitorRenderCounts" "$mode apply render"
 
     local geometry_shifted
     geometry_shifted="$(client_geometry "$target_title")"
@@ -1450,14 +1477,23 @@ PY
     capture_output "$shifted"
     assert_damage_cleanup "$baseline" "$shifted" "$physical_offset" "$mode apply"
 
-    local damage_before_reset
-    damage_before_reset="$(monitor_damage_count)"
-    reset_transform | grep -qx "ok"
-    wait_for_monitor_damage_after "$damage_before_reset" "$mode reset"
+    wait_for_counter_quiet "monitorRenderCounts" "$mode shifted screenshot settle"
 
-    local damage_after_reset
-    damage_after_reset="$(monitor_damage_count)"
-    assert_no_repeated_monitor_damage "$damage_after_reset" "$mode reset"
+    local damage_before_reset
+    local render_before_reset
+    damage_before_reset="$(state_counter "dedicatedDamageRequests")"
+    render_before_reset="$(state_counter "monitorRenderCounts")"
+
+    reset_transform | grep -qx "ok"
+
+    wait_for_counter_after \
+        "dedicatedDamageRequests" "$damage_before_reset" "$mode reset damage request"
+    wait_for_counter_after \
+        "monitorRenderCounts" "$render_before_reset" "$mode reset compositor frame"
+    wait_for_counter_quiet \
+        "dedicatedDamageRequests" "$mode reset damage requests"
+    wait_for_counter_quiet \
+        "monitorRenderCounts" "$mode reset render"
 
     capture_output "$restored"
     assert_damage_cleanup "$shifted" "$restored" "$((-physical_offset))" "$mode reset"

@@ -307,15 +307,27 @@ native `CHyprRenderer::damageMonitor()` adds monitor-wide damage and
 dedicated PSD dispatcher already calls this path when an offset is applied and
 when it is reset.
 
-The QEMU probe now enables Hyprland's native `debug:log_damage` output and
-requires each dedicated apply/reset operation to produce a
-`Damage: Monitor <name>` event. It also performs a strict old/new pixel-mask
-comparison: translated client pixels must appear at the new position and no
-stale client-colored pixels may remain in the old position.
+The first CI implementation (#228) attempted to observe
+`debug:log_damage` through Hyprland's redirected logger. The backend did emit
+`Damage: Monitor Virtual-1`, but the asynchronous log write became visible
+just after the probe timeout, producing a false negative. Log-file timing is
+therefore not used as correctness evidence.
 
-Finally, after the apply-triggered and reset-triggered frames settle, the probe
-holds the scene static and requires the monitor-damage count to remain stable.
-This checks the architectural property that a persistent PSD offset is state,
-not a polling/redraw loop. The dedicated hook itself contains no timer or
-animation driver; subsequent rendering remains driven by compositor/client
-damage and other normal Wayland events.
+The plugin now exposes two diagnostic per-monitor counters in
+`psd-plugin-state`: `dedicatedDamageRequests` is incremented immediately
+before the dedicated path calls `damageMonitor()`, and `monitorRenderCounts`
+is incremented from Hyprland's `preRender` hook. The QEMU probe requires each
+apply/reset to advance both counters, then requires both to become quiet while
+the scene is static.
+
+The probe still performs a strict old/new pixel-mask comparison: translated
+client pixels must appear at the new position and no stale client-colored
+pixels may remain in the old position. This combines synchronous request
+evidence, compositor-frame evidence and final framebuffer correctness without
+depending on logger flush latency.
+
+A persistent PSD offset remains state rather than an animation source. The
+dedicated hook contains no timer or polling loop; once the apply/reset frame
+settles, no further dedicated damage requests should occur and the compositor
+render counter must become idle until normal Wayland/compositor events require
+another frame.
