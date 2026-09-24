@@ -331,3 +331,15 @@ dedicated hook contains no timer or polling loop; once the apply/reset frame
 settles, no further dedicated damage requests should occur and the compositor
 render counter must become idle until normal Wayland/compositor events require
 another frame.
+
+
+#### Damage probe harness correction — CI #229
+
+CI #229 did not invalidate the dedicated damage path. The probe aborted before
+the damage assertions because its `state_counter()` helper combined
+`hyprctl ... | python3 -` with a heredoc containing the Python program. The
+heredoc owns standard input, so the Python process could not consume the piped
+JSON state; under `set -e` the command substitution terminated the probe.
+
+The helper now captures `psd-plugin-state` first and passes the JSON to Python
+as an explicit argument. No compositor/backend behavior changed in this fix.

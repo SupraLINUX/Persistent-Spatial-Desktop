@@ -310,14 +310,18 @@ PY
 
 state_counter() {
     local field="$1"
+    local state
 
-    hyprctl -j psd-plugin-state | python3 - "$field" "$monitor_name" <<'PY'
+    # Do not combine a pipe with the heredoc that carries the Python source:
+    # the heredoc owns stdin. Pass the hyprctl JSON explicitly instead.
+    state="$(hyprctl -j psd-plugin-state)"
+    python3 - "$state" "$field" "$monitor_name" <<'PY'
 import json
 import sys
 
-state = json.load(sys.stdin)
-field = sys.argv[1]
-monitor = sys.argv[2]
+state = json.loads(sys.argv[1])
+field = sys.argv[2]
+monitor = sys.argv[3]
 entry = next(
     (item for item in state.get(field, []) if item.get("monitor") == monitor),
     None,
