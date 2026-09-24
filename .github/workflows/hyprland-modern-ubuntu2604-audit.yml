@@ -1,0 +1,39 @@
+name: hyprland-modern-ubuntu2604-audit
+
+concurrency:
+  group: psd-hyprland-modern-audit-${{ github.ref }}
+  cancel-in-progress: true
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - experiment/hyprland-0562-ubuntu2604
+    paths:
+      - .github/workflows/hyprland-modern-ubuntu2604-audit.yml
+      - tests/compat/run-hyprland-modern-audit.sh
+
+jobs:
+  ubuntu-26-04-container:
+    name: Ubuntu 26.04 / Hyprland v0.56.2 compatibility
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    container:
+      image: ubuntu:26.04
+
+    steps:
+      - name: Checkout experiment
+        uses: actions/checkout@v4
+
+      - name: Run compatibility audit
+        env:
+          HYPRLAND_TAG: v0.56.2
+        run: bash tests/compat/run-hyprland-modern-audit.sh
+
+      - name: Upload audit evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hyprland-v0562-ubuntu2604-audit
+          path: ${{ runner.temp }}/psd-hyprland-modern-audit/report
+          if-no-files-found: warn
