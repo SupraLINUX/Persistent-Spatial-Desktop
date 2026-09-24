@@ -71,15 +71,21 @@ install_available_packages() {
 build_component() {
   local name="$1"
   local repo_url="$2"
-  local tag="$3"
+  local ref="$3"
   local src="$SRC_DIR/$name"
   local build="$BUILD_DIR/$name"
 
-  section "Build isolated component: $name $tag"
+  section "Build isolated component: $name $ref"
 
   rm -rf "$src" "$build"
-  if ! git clone --quiet --depth 1 --branch "$tag" --recursive "$repo_url" "$src"; then
-    printf 'clone failed: %s %s\n' "$repo_url" "$tag" | tee "$REPORT_DIR/$name.failure"
+  if ! git clone --quiet --filter=blob:none --no-checkout "$repo_url" "$src"; then
+    printf 'clone failed: %s %s\n' "$repo_url" "$ref" | tee "$REPORT_DIR/$name.failure"
+    return 1
+  fi
+  if ! git -C "$src" fetch --quiet --depth 1 origin "$ref" ||
+     ! git -C "$src" checkout --quiet --detach FETCH_HEAD ||
+     ! git -C "$src" submodule update --init --recursive --depth 1; then
+    printf 'checkout failed: %s %s\n' "$repo_url" "$ref" | tee "$REPORT_DIR/$name.failure"
     return 1
   fi
 
@@ -111,6 +117,37 @@ build_component() {
   return 0
 }
 
+build_wayland_protocols_overlay() {
+  local version="1.49"
+  local src="$SRC_DIR/wayland-protocols-$version"
+  local build="$BUILD_DIR/wayland-protocols-$version"
+
+  section "Build-only overlay: wayland-protocols $version"
+
+  rm -rf "$src" "$build"
+  if ! git clone --quiet --depth 1 --branch "$version" \
+      https://gitlab.freedesktop.org/wayland/wayland-protocols.git "$src"; then
+    printf 'clone failed: wayland-protocols %s\n' "$version" | tee "$REPORT_DIR/wayland-protocols.failure"
+    return 1
+  fi
+
+  if ! meson setup "$build" "$src" \
+      --prefix="$PREFIX" \
+      --libdir=lib \
+      >"$REPORT_DIR/wayland-protocols-configure.log" 2>&1; then
+    cat "$REPORT_DIR/wayland-protocols-configure.log"
+    return 1
+  fi
+
+  if ! meson install -C "$build" >"$REPORT_DIR/wayland-protocols-install.log" 2>&1; then
+    cat "$REPORT_DIR/wayland-protocols-install.log"
+    return 1
+  fi
+
+  find "$PREFIX" -maxdepth 5 \( -type f -o -type l \) | grep -E "wayland-protocols|pkgconfig/wayland-protocols\.pc" | sort > "$REPORT_DIR/wayland-protocols-overlay-files.txt" || true
+  printf 'PASS\n' | tee "$REPORT_DIR/wayland-protocols.result"
+  return 0
+}
 section "Environment"
 cat /etc/os-release
 uname -a
@@ -138,6 +175,7 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
   file \
   git \
   jq \
+  meson \
   ninja-build \
   pkgconf \
   python3
@@ -153,10 +191,12 @@ cat "$REPORT_DIR/apt-build-dep-hyprland.log"
 section "Install additional generic dependencies when Ubuntu provides them"
 install_available_packages \
   glslang-dev \
+  glslang-tools \
   hwdata \
   libdisplay-info-dev \
   libdrm-dev \
   libeis-dev \
+  libffi-dev \
   libgbm-dev \
   libgl-dev \
   libgles-dev \
@@ -285,28 +325,37 @@ fi
 
 section "Build isolated Hypr stack into $PREFIX"
 export PATH="$PREFIX/bin:$PATH"
-export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
+export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig:$PREFIX/share/pkgconfig:${PKG_CONFIG_PATH:-}"
 export CMAKE_PREFIX_PATH="$PREFIX${CMAKE_PREFIX_PATH:+:$CMAKE_PREFIX_PATH}"
 export LD_LIBRARY_PATH="$PREFIX/lib:${LD_LIBRARY_PATH:-}"
 
 isolated_stack_status="pass"
 
+# v0.56.2 flake.lock is the compatibility reference for the Hypr ecosystem.
+# Use the exact revisions upstream shipped together instead of arbitrary minima.
+if ! build_wayland_protocols_overlay; then
+  isolated_stack_status="fail:wayland-protocols-overlay"
+fi
+
 components=(
-  "hyprwayland-scanner|https://github.com/hyprwm/hyprwayland-scanner.git|v0.3.10"
-  "hyprutils|https://github.com/hyprwm/hyprutils.git|v0.14.0"
-  "hyprlang|https://github.com/hyprwm/hyprlang.git|v0.6.7"
-  "hyprcursor|https://github.com/hyprwm/hyprcursor.git|v0.1.7"
-  "hyprgraphics|https://github.com/hyprwm/hyprgraphics.git|v0.5.1"
-  "aquamarine|https://github.com/hyprwm/aquamarine.git|v0.9.3"
+  "hyprwayland-scanner|https://github.com/hyprwm/hyprwayland-scanner.git|b8632713a6beaf28b56f2a7b0ab2fb7088dbb404"
+  "hyprutils|https://github.com/hyprwm/hyprutils.git|5a7b8cf221914ce4714407950e4ffbdddcd8b66f"
+  "hyprlang|https://github.com/hyprwm/hyprlang.git|090117506ddc3d7f26e650ff344d378c2ec329cc"
+  "hyprcursor|https://github.com/hyprwm/hyprcursor.git|39435900785d0c560c6ae8777d29f28617d031ef"
+  "hyprgraphics|https://github.com/hyprwm/hyprgraphics.git|8699c38f0e4a1ca3bfc84f84ba020509ced1f133"
+  "aquamarine|https://github.com/hyprwm/aquamarine.git|1a10fe26a9f7d989c359e6a9ea61aa2e44d06c36"
+  "hyprwire|https://github.com/hyprwm/hyprwire.git|7d935bb54674aa0fbd327d2a6888bd0630079ed0"
 )
 
-for spec in "${components[@]}"; do
-  IFS='|' read -r name repo_url tag <<< "$spec"
-  if ! build_component "$name" "$repo_url" "$tag"; then
-    isolated_stack_status="fail:$name"
-    break
-  fi
-done
+if [[ "$isolated_stack_status" == "pass" ]]; then
+  for spec in "${components[@]}"; do
+    IFS='|' read -r name repo_url ref <<< "$spec"
+    if ! build_component "$name" "$repo_url" "$ref"; then
+      isolated_stack_status="fail:$name"
+      break
+    fi
+  done
+fi
 record_status ISOLATED_HYPR_STACK "$isolated_stack_status"
 
 isolated_hyprland_status="not-run"
@@ -334,8 +383,15 @@ if [[ "$isolated_stack_status" == "pass" ]]; then
     set -e
     if [[ "$isolated_build_rc" -eq 0 ]]; then
       isolated_hyprland_status="pass"
+      cmake --install "$BUILD_DIR/Hyprland-isolated" > "$REPORT_DIR/isolated-hyprland-install.log" 2>&1 || true
       ldd "$BUILD_DIR/Hyprland-isolated/Hyprland" > "$REPORT_DIR/isolated-hyprland-ldd.txt" 2>&1 || true
       "$BUILD_DIR/Hyprland-isolated/Hyprland" --version > "$REPORT_DIR/isolated-hyprland-version.txt" 2>&1 || true
+      find "$PREFIX" -maxdepth 5 \( -type f -o -type l \) | sort > "$REPORT_DIR/isolated-prefix-files.txt" || true
+      if grep -Eq "wayland-protocols|/share/wayland-protocols" "$REPORT_DIR/isolated-hyprland-ldd.txt"; then
+        record_status WAYLAND_PROTOCOLS_RUNTIME_LINK unexpected
+      else
+        record_status WAYLAND_PROTOCOLS_RUNTIME_LINK none
+      fi
     else
       isolated_hyprland_status="build-fail"
     fi
@@ -430,7 +486,7 @@ section "Generate summary"
   if [[ "$stock_build_status" == "pass" ]]; then
     echo "- Hyprland $HYPRLAND_TAG builds directly against the Ubuntu 26.04 dependency set used by this job."
   elif [[ "$isolated_hyprland_status" == "pass" ]]; then
-    echo "- Stock Ubuntu Hypr packages are insufficient, but replacing only the pinned Hypr ecosystem in an isolated prefix is enough to build Hyprland $HYPRLAND_TAG."
+    echo "- Stock Ubuntu build inputs are insufficient, but Hyprland $HYPRLAND_TAG builds with upstream pinned Hypr revisions plus an isolated build-only wayland-protocols 1.49 overlay."
   else
     echo "- The isolated Hypr-only replacement was not sufficient. Inspect logs for a core Ubuntu dependency or source/API incompatibility."
   fi
