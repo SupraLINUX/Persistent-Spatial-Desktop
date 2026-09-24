@@ -5,6 +5,8 @@
 #include <QCoreApplication>
 #include <QPaintEvent>
 #include <QPainter>
+#include <QPoint>
+#include <QTimer>
 #include <QWidget>
 
 namespace {
@@ -12,8 +14,12 @@ namespace {
 class SolidWindow final : public QWidget
 {
 public:
-    explicit SolidWindow(const QColor &color)
-        : m_color(color)
+    explicit SolidWindow(
+        const QColor &color,
+        QWidget *parent = nullptr,
+        Qt::WindowFlags flags = Qt::WindowFlags{})
+        : QWidget(parent, flags)
+        , m_color(color)
     {
         setAttribute(Qt::WA_OpaquePaintEvent);
     }
@@ -56,15 +62,31 @@ int main(int argc, char *argv[])
     const QCommandLineOption fullscreenOption(
         QStringLiteral("fullscreen"),
         QStringLiteral("Request compositor fullscreen immediately."));
+    const QCommandLineOption popupOption(
+        QStringLiteral("popup"),
+        QStringLiteral("Create a deterministic transient Qt popup for compositor probes."));
+    const QCommandLineOption popupColorOption(
+        QStringLiteral("popup-color"),
+        QStringLiteral("Solid popup color used by render probes."),
+        QStringLiteral("color"),
+        QStringLiteral("#16f27a"));
 
     parser.addOption(titleOption);
     parser.addOption(colorOption);
     parser.addOption(fullscreenOption);
+    parser.addOption(popupOption);
+    parser.addOption(popupColorOption);
     parser.process(app);
 
     const QColor color(parser.value(colorOption));
     if (!color.isValid()) {
         qCritical("Invalid --color value");
+        return EXIT_FAILURE;
+    }
+
+    const QColor popupColor(parser.value(popupColorOption));
+    if (parser.isSet(popupOption) && !popupColor.isValid()) {
+        qCritical("Invalid --popup-color value");
         return EXIT_FAILURE;
     }
 
@@ -76,6 +98,24 @@ int main(int argc, char *argv[])
         window.showFullScreen();
     else
         window.show();
+
+    if (parser.isSet(popupOption)) {
+        auto *popup = new SolidWindow(
+            popupColor,
+            &window,
+            Qt::Popup | Qt::FramelessWindowHint);
+        popup->resize(220, 140);
+
+        // The probe first lets Hyprland settle the parent into deterministic
+        // floating geometry. Creating the transient afterwards also makes the
+        // Wayland protocol trace unambiguous: this surface is an xdg_popup,
+        // not a second toplevel window.
+        QTimer::singleShot(1200, popup, [popup, &window] {
+            popup->move(window.mapToGlobal(QPoint(96, 96)));
+            popup->show();
+            popup->raise();
+        });
+    }
 
     return app.exec();
 }

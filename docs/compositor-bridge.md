@@ -195,8 +195,9 @@ Consequences of the experiment:
 - Hyprland's existing floating correction is preserved and composed rather than
   neutralized;
 - tiled, floating and pinned windows share the same monitor-scoped PSD vector;
-- popups/subsurfaces produced inside the same `renderWindow()` call inherit the
-  composed render position;
+- popup/subsurface inheritance is **not** assumed from call structure alone;
+  each must pass an explicit protocol-aware pixel probe before this backend is
+  promoted;
 - logical client geometry remains untouched;
 - layer-shell PSD surfaces are not transformed by this hook.
 
@@ -214,3 +215,27 @@ The dedicated backend uses separate experimental dispatchers:
 The legacy commands remain available only as a comparison baseline until the
 dedicated backend passes the complete validation suite and the runtime is
 migrated.
+
+
+### Modern Hyprland comparison checkpoint — v0.56.2
+
+The stable upstream comparison target is pinned to **Hyprland v0.56.2** rather
+than `main`.
+
+That tag contains `Render::IWindowTransformer` and per-window transformer
+storage. The upstream interface documentation is also explicit about a current
+limitation: window transformers affect the main window pass, **not popups**.
+
+Source:
+
+- [Hyprland v0.56.2 `Transformer.hpp`](https://github.com/hyprwm/Hyprland/blob/v0.56.2/src/render/transformer/Transformer.hpp)
+
+Therefore `IWindowTransformer` is useful evidence of a cleaner modern render
+extension, but it is not yet proven to be a drop-in implementation of PSD's
+monitor-wide spatial presentation transform. In particular, PSD must still
+characterize popup composition, subsurfaces, decorations, damage and
+direct-scanout behavior.
+
+Newer upstream `main` contains additional transformer/effects infrastructure,
+but PSD does not design against moving `main`. It can be reconsidered only
+after that infrastructure exists in a pinned stable tag.

@@ -617,8 +617,195 @@ PY
     echo "PSD render probe: $mode render-offset semantics PASS backend=$RENDER_BACKEND"
 }
 
+
+run_popup_case() {
+    if [[ "$RENDER_BACKEND" != "dedicated" ]]; then
+        return
+    fi
+
+    local mode="xdg-popup"
+    local target_title="psd-render-$mode-$$"
+    local target_pid=""
+    local client_log="$work_dir/$mode-client.log"
+    local baseline="$work_dir/$mode-baseline.png"
+    local shifted="$work_dir/$mode-shifted.png"
+    local restored="$work_dir/$mode-restored.png"
+
+    reset_transform | grep -qx "ok"
+
+    WAYLAND_DEBUG=1 "$CLIENT_PATH" \
+        --title "$target_title" \
+        --color "#334a88" \
+        --popup \
+        --popup-color "#16f27a" \
+        >"$client_log" 2>&1 &
+    target_pid=$!
+    client_pids+=("$target_pid")
+
+    if ! wait_for_client "$target_title" 0 0; then
+        echo "PSD render probe: popup parent did not map tiled." >&2
+        hyprctl -j clients >&2 || true
+        exit 1
+    fi
+
+    hyprctl dispatch focuswindow "title:^$target_title$" | grep -qx "ok"
+    hyprctl dispatch togglefloating active | grep -qx "ok"
+    hyprctl dispatch resizeactive "exact 640 480" | grep -qx "ok"
+    hyprctl dispatch centerwindow | grep -qx "ok"
+
+    if ! wait_for_client "$target_title" 1 0; then
+        echo "PSD render probe: popup parent did not become floating." >&2
+        hyprctl -j clients >&2 || true
+        exit 1
+    fi
+
+    local geometry_ready=0
+    local geometry_now=""
+    for _ in $(seq 1 60); do
+        geometry_now="$(client_geometry "$target_title" || true)"
+        if python3 - "$geometry_now" <<'PY' >/dev/null 2>&1
+import sys
+if not sys.argv[1]:
+    raise SystemExit(1)
+_, _, w, h = map(int, sys.argv[1].split(","))
+raise SystemExit(0 if abs(w - 640) <= 4 and abs(h - 480) <= 4 else 1)
+PY
+        then
+            geometry_ready=1
+            break
+        fi
+        sleep 0.1
+    done
+
+    if [[ "$geometry_ready" != "1" ]]; then
+        echo "PSD render probe: popup parent geometry did not settle." >&2
+        hyprctl -j clients >&2 || true
+        exit 1
+    fi
+
+    local popup_protocol_ready=0
+    for _ in $(seq 1 80); do
+        if grep -q "get_popup" "$client_log"; then
+            popup_protocol_ready=1
+            break
+        fi
+        if ! kill -0 "$target_pid" >/dev/null 2>&1; then
+            echo "PSD render probe: popup client exited before creating xdg_popup." >&2
+            cat "$client_log" >&2 || true
+            exit 1
+        fi
+        sleep 0.1
+    done
+
+    if [[ "$popup_protocol_ready" != "1" ]]; then
+        echo "PSD render probe: Qt popup did not emit an xdg_popup request." >&2
+        cat "$client_log" >&2 || true
+        exit 1
+    fi
+    echo "PSD render probe: xdg_popup protocol evidence PASS"
+
+    local popup_pixels_ready=0
+    for _ in $(seq 1 60); do
+        capture_output "$baseline"
+        if python3 - "$baseline" <<'PY' >/dev/null 2>&1
+from PIL import Image
+import sys
+target = (22, 242, 122)
+image = Image.open(sys.argv[1]).convert("RGB")
+count = sum(
+    1
+    for pixel in image.getdata()
+    if all(abs(pixel[i] - target[i]) <= 3 for i in range(3))
+)
+raise SystemExit(0 if count >= 4000 else 1)
+PY
+        then
+            popup_pixels_ready=1
+            break
+        fi
+        sleep 0.1
+    done
+
+    if [[ "$popup_pixels_ready" != "1" ]]; then
+        echo "PSD render probe: xdg_popup did not become visible with deterministic pixels." >&2
+        cat "$client_log" >&2 || true
+        exit 1
+    fi
+
+    local geometry_before
+    geometry_before="$(client_geometry "$target_title")"
+
+    local logical_offset=96
+    local physical_offset
+    physical_offset="$(
+        python3 - "$logical_offset" "$monitor_scale" <<'PY'
+import sys
+print(round(float(sys.argv[1]) * float(sys.argv[2])))
+PY
+    )"
+
+    apply_transform "$logical_offset" | grep -qx "ok"
+    sleep 0.2
+
+    local compositor_state
+    compositor_state="$(hyprctl -j psd-plugin-state)"
+    python3 - "$compositor_state" "$monitor_name" "$logical_offset" <<'PY'
+import json
+import sys
+
+state = json.loads(sys.argv[1])
+monitor = sys.argv[2]
+expected = float(sys.argv[3])
+entries = [
+    item for item in state.get("dedicatedPresentationOffsets", [])
+    if item.get("monitor") == monitor
+]
+if len(entries) != 1:
+    raise SystemExit(
+        f"PSD render probe: popup unexpected dedicated transform state: {state}"
+    )
+entry = entries[0]
+if abs(float(entry.get("x", 0.0)) - expected) > 0.01:
+    raise SystemExit(
+        f"PSD render probe: popup wrong dedicated x offset: {entry}"
+    )
+if abs(float(entry.get("y", 0.0))) > 0.01:
+    raise SystemExit(
+        f"PSD render probe: popup wrong dedicated y offset: {entry}"
+    )
+PY
+
+    local geometry_shifted
+    geometry_shifted="$(client_geometry "$target_title")"
+    if [[ "$geometry_shifted" != "$geometry_before" ]]; then
+        echo "PSD render probe: popup parent logical geometry changed under render-only offset." >&2
+        echo "before=$geometry_before shifted=$geometry_shifted" >&2
+        exit 1
+    fi
+
+    capture_output "$shifted"
+    assert_pixel_translation "$baseline" "$shifted" "$physical_offset" "$mode"
+
+    reset_transform | grep -qx "ok"
+    sleep 0.2
+    capture_output "$restored"
+    assert_pixel_translation "$baseline" "$restored" 0 "$mode reset"
+
+    kill -TERM "$target_pid" >/dev/null 2>&1 || true
+    wait "$target_pid" >/dev/null 2>&1 || true
+    target_pid=""
+
+    if ! wait_for_client_gone "$target_title"; then
+        echo "PSD render probe: popup parent remained in compositor state after exit." >&2
+        exit 1
+    fi
+
+    echo "PSD render probe: xdg_popup pixel evidence PASS backend=$RENDER_BACKEND"
+}
+
 run_case tiled
 run_case floating
 run_case pinned
+run_popup_case
 
 echo "PSD render probe: tiled/floating/pinned pixel evidence PASS backend=$RENDER_BACKEND"
