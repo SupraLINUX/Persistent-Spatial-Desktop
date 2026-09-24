@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+set -e
 set -u
 set -o pipefail
 
@@ -21,6 +22,44 @@ section() {
 
 record_status() {
   printf '%s=%s\n' "$1" "$2" >> "$REPORT_DIR/status.env"
+}
+
+apt_update_retry() {
+  local attempt
+  for attempt in 1 2 3; do
+    if apt-get -o Acquire::Retries=3 update; then
+      return 0
+    fi
+    printf 'apt update attempt %s failed; refreshing again\n' "$attempt" >&2
+    sleep $((attempt * 2))
+  done
+  return 1
+}
+
+apt_install_retry() {
+  local attempt
+  for attempt in 1 2 3; do
+    if DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::Retries=3 install -y --no-install-recommends "$@"; then
+      return 0
+    fi
+    printf 'apt install attempt %s failed; refreshing indexes before retry\n' "$attempt" >&2
+    apt_update_retry || true
+    sleep $((attempt * 2))
+  done
+  return 1
+}
+
+apt_build_dep_retry() {
+  local attempt
+  for attempt in 1 2 3; do
+    if DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::Retries=3 build-dep -y hyprland; then
+      return 0
+    fi
+    printf 'apt build-dep attempt %s failed; refreshing indexes before retry\n' "$attempt" >&2
+    apt_update_retry || true
+    sleep $((attempt * 2))
+  done
+  return 1
 }
 
 pkg_version() {
@@ -65,7 +104,7 @@ install_available_packages() {
   printf '%s\n' "${missing[@]}" > "$REPORT_DIR/missing-extra-build-packages.txt"
 
   if (("${#available[@]}" > 0)); then
-    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "${available[@]}"
+    apt_install_retry "${available[@]}"
   fi
 }
 
@@ -209,10 +248,11 @@ if [[ -f /etc/apt/sources.list.d/ubuntu.sources ]]; then
   cp /etc/apt/sources.list.d/ubuntu.sources "$REPORT_DIR/ubuntu.sources.after"
 fi
 
-apt-get update
+apt_update_retry
+record_status INFRA_APT_INDEX_READY pass
 
 section "Install baseline tooling"
-DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+apt_install_retry \
   apt-utils \
   binutils \
   build-essential \
@@ -230,11 +270,17 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
 
 section "Install Ubuntu 26.04 Hyprland build dependencies"
 set +e
-DEBIAN_FRONTEND=noninteractive apt-get build-dep -y hyprland >"$REPORT_DIR/apt-build-dep-hyprland.log" 2>&1
+apt_build_dep_retry >"$REPORT_DIR/apt-build-dep-hyprland.log" 2>&1
 build_dep_rc=$?
 set -e
 record_status APT_BUILD_DEP_HYPRLAND_RC "$build_dep_rc"
 cat "$REPORT_DIR/apt-build-dep-hyprland.log"
+if [[ "$build_dep_rc" -ne 0 ]]; then
+  record_status INFRA_APT_BUILD_DEP_READY fail
+  printf 'Persistent Ubuntu mirror/package-index failure prevented a valid compatibility test.\n' >&2
+  exit 2
+fi
+record_status INFRA_APT_BUILD_DEP_READY pass
 
 section "Install additional generic dependencies when Ubuntu provides them"
 install_available_packages \
@@ -276,6 +322,19 @@ install_available_packages \
   libzip-dev \
   uuid-dev \
   wayland-protocols
+
+section "Toolchain sanity after APT"
+for cmd in git cmake c++ pkg-config meson ninja; do
+  if ! command -v "$cmd" >/dev/null 2>&1; then
+    printf 'required tool missing after APT: %s\n' "$cmd" >&2
+    record_status INFRA_TOOLCHAIN_READY fail
+    exit 2
+  fi
+done
+record_status INFRA_TOOLCHAIN_READY pass
+printf 'git=%s\n' "$(command -v git)"
+printf 'cmake=%s\n' "$(command -v cmake)"
+printf 'pkg-config=%s\n' "$(command -v pkg-config)"
 
 section "Ubuntu package inventory"
 apt-cache policy hyprland hyprland-dev > "$REPORT_DIR/apt-policy-hyprland.txt" 2>&1 || true
