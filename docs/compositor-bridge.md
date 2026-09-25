@@ -778,3 +778,49 @@ A green QEMU result with `active=false` validates compatibility with the
 unsupported-VRR fallback path, not real adaptive-sync presentation. Active VRR
 still requires a physical VRR-capable DRM output and remains part of the later
 hardware/NVIDIA validation.
+
+
+### VRR compatibility checkpoint — CI #246
+
+CI #246 passed the VRR compatibility characterization. The QEMU virtio DRM
+output rejected the requested adaptive-sync mode:
+
+`VRR request=1 active=false original=false`.
+
+That is the expected unsupported-output path, not proof of active VRR.
+Crucially, the dedicated PSD backend remained event-driven while the VRR
+request was in effect:
+
+- apply damage request advanced exactly once;
+- apply render count advanced exactly once and then remained quiet;
+- reset damage request advanced exactly once;
+- reset render count advanced exactly once and then remained quiet;
+- PSD offset/reset did not alter the live VRR state;
+- removing the monitor override restored the original state.
+
+Real adaptive-sync presentation remains pending a physical VRR-capable DRM
+output, including NVIDIA validation.
+
+### Four-finger touchpad integration
+
+The core motion controller already has unit coverage for 1:1 gesture tracking,
+axis selection, distance commit, velocity commit and explicit cancel. The
+remaining gap is the real compositor-input path.
+
+QEMU integration now builds a non-installed Linux `uinput` helper that
+advertises a multitouch clickpad and injects actual multi-finger swipe events.
+The runtime probe arms PSD gesture events and listens on Hyprland's real
+`.socket2.sock` event stream.
+
+The characterization performs two swipes:
+
+1. three fingers: PSD must emit no `psdgesture*` event and must remain
+   inactive;
+2. four fingers: PSD must emit exactly one begin and one end plus one or more
+   updates, all for the focused monitor, with monotonic event timestamps and a
+   predominantly horizontal cumulative delta.
+
+After release, `gestureActive` must be false and gesture interception is
+disabled again. This covers kernel/uinput -> libinput -> Hyprland swipe hooks ->
+PSD plugin -> Hyprland event socket without adding any test-only injection API
+to the plugin itself.

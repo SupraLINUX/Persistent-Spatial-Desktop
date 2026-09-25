@@ -36,3 +36,10 @@ target_link_libraries(psd-integration-client
         Qt6::Gui
         Qt6::Widgets
 )
+
+
+# Linux-only virtual touchpad used by the native Hyprland/QEMU integration
+# probe. It talks directly to uinput and is never installed.
+add_executable(psd-uinput-touchpad
+    integration/psd-uinput-touchpad.cpp
+)
