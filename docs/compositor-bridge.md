@@ -709,3 +709,28 @@ The runtime now applies transforms with a complete monitor rule:
 
 and waits until `hyprctl monitors` reports the requested live transform.
 No PSD compositor/plugin semantics changed in this correction.
+
+
+#### Monitor-transform checkpoint — CI #244
+
+CI #244 successfully applied a real 90-degree output transform
+(`transform=1`) and ran the dedicated render-only characterization.
+
+Observed evidence:
+
+- live monitor transform reached 1;
+- logical window geometry remained unchanged;
+- applying a 96-unit PSD X offset produced screenshot vector
+  `(96, 0)`;
+- translation magnitude was exactly 96 pixels;
+- target pixel count ratio remained exactly 1.0000;
+- reset produced vector `(0, 0)`;
+- the complete QEMU probe finished PASS.
+
+Because transformed screencopy preserved the logical X direction for
+`transform=1`, the next checkpoint broadens the same invariant across every
+non-normal Wayland output transform, 1 through 7. Each transform is applied
+using the full monitor rule path, then the dedicated transform-only probe
+verifies logical geometry immutability, stable target area, 96-unit visual
+translation magnitude and exact reset. Scale remains 1.0 so transform behavior
+is isolated from the already-closed fractional-scale characterization.

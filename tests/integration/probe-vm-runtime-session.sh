@@ -375,7 +375,7 @@ if [[ "$fractional_plugin_preloaded" == "1" ]]; then
     echo "PSD VM runtime probe: fractional plugin unloaded"
 fi
 
-echo "PSD VM runtime probe: monitor-transform characterization begin transform=1"
+echo "PSD VM runtime probe: monitor-transform matrix characterization begin transforms=1..7"
 
 plugin_loaded="$(hyprctl -j plugin list | python3 -c 'import json,sys; d=json.load(sys.stdin); print(any(x.get("name")=="psd-hyprland-plugin" for x in d))')"
 if [[ "$plugin_loaded" != "True" ]]; then
@@ -383,12 +383,16 @@ if [[ "$plugin_loaded" != "True" ]]; then
     transform_plugin_preloaded=1
 fi
 
-set_monitor_transform 1
-echo "PSD VM runtime probe: monitor transform effective=1"
+for transform in 1 2 3 4 5 6 7; do
+    set_monitor_transform "$transform"
+    echo "PSD VM runtime probe: monitor transform effective=$transform"
 
-PSD_RENDER_PROBE_BACKEND=dedicated \
-PSD_RENDER_PROBE_TRANSFORM_ONLY=1 \
-    bash "$(dirname "$0")/probe-vm-render-transform.sh" "$test_client_path" "$PLUGIN_PATH"
+    PSD_RENDER_PROBE_BACKEND=dedicated \
+    PSD_RENDER_PROBE_TRANSFORM_ONLY=1 \
+        bash "$(dirname "$0")/probe-vm-render-transform.sh" "$test_client_path" "$PLUGIN_PATH"
+
+    echo "PSD VM runtime probe: monitor-transform characterization PASS transform=$transform"
+done
 
 set_monitor_transform "$original_monitor_transform"
 echo "PSD VM runtime probe: monitor transform restored to $original_monitor_transform"
@@ -399,7 +403,7 @@ if [[ "$transform_plugin_preloaded" == "1" ]]; then
     echo "PSD VM runtime probe: transform plugin unloaded"
 fi
 
-echo "PSD VM runtime probe: monitor-transform characterization PASS transform=1"
+echo "PSD VM runtime probe: monitor-transform matrix characterization PASS transforms=1..7"
 
 bash "$(dirname "$0")/probe-vm-workspace-animation.sh" "$test_client_path" "$PLUGIN_PATH"
 
