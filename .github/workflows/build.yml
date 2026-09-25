@@ -38,6 +38,10 @@ jobs:
       - name: Validate integration scripts
         run: |
           bash -n tests/integration/*.sh
+          if grep -nF '\\${' tests/integration/probe-hardware-nvidia.sh; then
+            echo "hardware probe contains escaped parameter expansion" >&2
+            exit 1
+          fi
           bash tests/integration/test-probe-live-session-mock.sh
 
       - name: Configure

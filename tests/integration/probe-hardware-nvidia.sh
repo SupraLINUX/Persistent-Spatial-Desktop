@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PLUGIN_PATH="\${1:-build-hypr/src/compositor/hyprland-plugin/psd-hyprland-plugin.so}"
-CLIENT_PATH="\${2:-build/tests/psd-integration-client}"
+PLUGIN_PATH="${1:-build-hypr/src/compositor/hyprland-plugin/psd-hyprland-plugin.so}"
+CLIENT_PATH="${2:-build/tests/psd-integration-client}"
 
 required_confirmation="I_UNDERSTAND_DISPLAY_MAY_FLICKER"
-if [[ "\${PSD_HW_CONFIRM:-}" != "$required_confirmation" ]]; then
+if [[ "${PSD_HW_CONFIRM:-}" != "$required_confirmation" ]]; then
     cat >&2 <<EOF
 PSD NVIDIA hardware probe: explicit opt-in required.
 
@@ -24,7 +24,7 @@ EOF
     exit 64
 fi
 
-if [[ -z "\${HYPRLAND_INSTANCE_SIGNATURE:-}" ]]; then
+if [[ -z "${HYPRLAND_INSTANCE_SIGNATURE:-}" ]]; then
     echo "PSD NVIDIA hardware probe: must run inside the Hyprland session under test." >&2
     exit 1
 fi
@@ -84,7 +84,7 @@ if [[ -r /sys/module/nvidia_drm/parameters/modeset ]]; then
 fi
 
 monitor_json="$(hyprctl -j monitors)"
-target_monitor="\${PSD_HW_MONITOR:-}"
+target_monitor="${PSD_HW_MONITOR:-}"
 
 if [[ -z "$target_monitor" ]]; then
     target_monitor="$(python3 - "$monitor_json" <<'PY'
@@ -400,7 +400,7 @@ fi
 echo "PSD NVIDIA hardware probe: real direct scanout ACTIVE target=$scanout_to blockedBy=$scanout_blocked"
 echo "PSD NVIDIA hardware probe: VRR during direct scanout=$fullscreen_vrr"
 
-if [[ "\${PSD_HW_REQUIRE_VRR:-1}" == "1" && "$fullscreen_vrr" != "true" ]]; then
+if [[ "${PSD_HW_REQUIRE_VRR:-1}" == "1" && "$fullscreen_vrr" != "true" ]]; then
     echo "PSD NVIDIA hardware probe: direct scanout passed, but active VRR was required and is false." >&2
     echo "Re-run only after VRR is enabled by the normal Hyprland configuration for this monitor." >&2
     exit 3
