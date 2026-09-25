@@ -11,6 +11,7 @@ mkdir -p "$tmp_dir/bin"
 mock_log="$tmp_dir/hyprctl.log"
 plugin_state="$tmp_dir/plugin-loaded"
 transform_state="$tmp_dir/transform-state.json"
+gesture_state="$tmp_dir/gesture-enabled"
 shell_ready="$tmp_dir/shell-ready"
 fake_plugin="$tmp_dir/psd-hyprland-plugin.so"
 fake_shell="$tmp_dir/psd-shell"
@@ -24,6 +25,7 @@ set -euo pipefail
 log="${PSD_MOCK_LOG:?}"
 plugin_state="${PSD_MOCK_PLUGIN_STATE:?}"
 transform_state="${PSD_MOCK_TRANSFORM_STATE:?}"
+gesture_state="${PSD_MOCK_GESTURE_STATE:?}"
 shell_ready="${PSD_MOCK_SHELL_READY:?}"
 
 printf '%s\n' "$*" >>"$log"
@@ -57,10 +59,21 @@ case "$*" in
         ;;
     "-j psd-plugin-state")
         [[ -e "$plugin_state" ]] || exit 1
+        gesture_enabled=false
+        [[ -e "$gesture_state" ]] && gesture_enabled=true
+
         if [[ -e "$transform_state" ]]; then
-            cat "$transform_state"
+            python3 - "$transform_state" "$gesture_enabled" <<'PY'
+import json
+import sys
+
+state = json.load(open(sys.argv[1], encoding="utf-8"))
+state["gestureEventsEnabled"] = sys.argv[2] == "true"
+state["gestureActive"] = False
+print(json.dumps(state, separators=(",", ":")))
+PY
         else
-            printf '%s\n' '{"trackedTransforms":[],"touchedWorkspaceCount":0,"workspaceSwitchResetCount":0,"gestureEventsEnabled":false,"gestureActive":false}'
+            printf '{"trackedTransforms":[],"touchedWorkspaceCount":0,"workspaceSwitchResetCount":0,"gestureEventsEnabled":%s,"gestureActive":false}\n' "$gesture_enabled"
         fi
         ;;
     "-j monitors")
@@ -68,6 +81,15 @@ case "$*" in
         ;;
     "dispatch plugin:psd:gesture-events "*)
         [[ -e "$plugin_state" ]] || exit 1
+        set -- $*
+        enabled="${4}"
+        if [[ "$enabled" == "1" ]]; then
+            touch "$gesture_state"
+        elif [[ "$enabled" == "0" ]]; then
+            rm -f "$gesture_state"
+        else
+            exit 1
+        fi
         printf '%s\n' 'ok'
         ;;
     "dispatch plugin:psd:offset "*)
@@ -76,13 +98,13 @@ case "$*" in
         monitor="${3}"
         x="${4}"
         y="${5}"
-        printf '{"trackedTransforms":[{"monitor":"%s","workspaceGeneration":1,"x":%s,"y":%s}],"touchedWorkspaceCount":1,"workspaceSwitchResetCount":0,"gestureEventsEnabled":false,"gestureActive":false}\n' \
+        printf '{"trackedTransforms":[{"monitor":"%s","workspaceGeneration":1,"x":%s,"y":%s}],"touchedWorkspaceCount":1,"workspaceSwitchResetCount":0,"gestureActive":false}\n' \
             "$monitor" "$x" "$y" >"$transform_state"
         printf '%s\n' 'ok'
         ;;
     "dispatch plugin:psd:reset "*)
         [[ -e "$plugin_state" ]] || exit 1
-        rm -f "$transform_state"
+        rm -f "$transform_state" "$gesture_state"
         printf '%s\n' 'ok'
         ;;
     *)
@@ -100,6 +122,7 @@ set -euo pipefail
 ready="${PSD_MOCK_SHELL_READY:?}"
 
 cleanup() {
+    hyprctl dispatch plugin:psd:gesture-events 0 >/dev/null 2>&1 || true
     rm -f "$ready"
 }
 
@@ -111,6 +134,7 @@ terminate() {
 trap cleanup EXIT
 trap terminate TERM INT
 
+hyprctl dispatch plugin:psd:gesture-events 1 >/dev/null
 touch "$ready"
 while :; do
     sleep 1
@@ -125,6 +149,7 @@ run_probe() {
         PSD_MOCK_LOG="$mock_log" \
         PSD_MOCK_PLUGIN_STATE="$plugin_state" \
         PSD_MOCK_TRANSFORM_STATE="$transform_state" \
+        PSD_MOCK_GESTURE_STATE="$gesture_state" \
         PSD_MOCK_SHELL_READY="$shell_ready" \
         "$@"
 }
@@ -132,7 +157,7 @@ run_probe() {
 # Scenario 1: the session already owns the plugin. The probe must leave it
 # loaded, but it still has to reset every monitor before returning.
 : >"$mock_log"
-rm -f "$transform_state"
+rm -f "$transform_state" "$gesture_state"
 touch "$plugin_state"
 output="$(
     run_probe PSD_PROBE_EXERCISE_OFFSET=1 \
@@ -149,7 +174,7 @@ grep -q 'dispatch plugin:psd:reset DP-1' "$mock_log"
 
 # Scenario 2: the probe owns plugin load/unload and must leave no plugin state.
 : >"$mock_log"
-rm -f "$transform_state"
+rm -f "$transform_state" "$gesture_state"
 rm -f "$plugin_state"
 output="$(
     run_probe bash "$probe" "$fake_shell" "$fake_plugin"

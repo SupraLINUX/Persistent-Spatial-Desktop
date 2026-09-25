@@ -883,3 +883,32 @@ The first pass uses only a loose 500 ms sanity ceiling. That ceiling is a
 characterization guard, not a product latency target. A production threshold
 must be based on repeated measurements from physical touchpads and real GPU
 presentation, including NVIDIA.
+
+
+#### Runtime gesture shutdown correction — CI #248
+
+CI #248 successfully exercised the new real-shell gesture path before failing
+during teardown. The measured first-update latency in QEMU was:
+
+- Hyprland swipe hook -> shell-generated compositor command: **39.685 ms**;
+- compositor command -> next monitor preRender: **0.341 ms**;
+- hook -> preRender total: **40.027 ms**.
+
+This is a single virtualized characterization sample, not a production latency
+target.
+
+The QEMU failure occurred after that PASS when `psd-shell` received SIGTERM
+and exited with signal 11. The first auto-arm implementation attempted to
+confirm gesture disarm by starting a nested Qt `QEventLoop` after the main
+`QGuiApplication::exec()` had already returned.
+
+Shutdown now uses one bounded synchronous Hyprland command-socket request for
+the final gesture arm/disarm state instead. Runtime arming remains asynchronous
+and event-driven during normal operation; only the terminal shutdown drain uses
+the blocking local-socket path.
+
+The non-QEMU Ubuntu job also exposed an expected fixture mismatch: the
+`probe-live-session` mock shell still modeled the old runtime where tests
+manually armed gesture events. The mock now auto-arms on start, auto-disarms on
+termination, and reports gesture state through its mocked
+`psd-plugin-state`.

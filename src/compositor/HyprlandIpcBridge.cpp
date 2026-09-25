@@ -2,7 +2,7 @@
 
 #include "compositor/HyprlandProtocol.h"
 
-#include <QEventLoop>
+#include <QElapsedTimer>
 #include <QFileInfo>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -146,26 +146,60 @@ bool HyprlandIpcBridge::waitForExperimentalSpatialGesturesArmed(
     if (m_experimentalSpatialGesturesArmed == armed)
         return true;
 
-    QEventLoop loop;
-    QTimer timer;
-    timer.setSingleShot(true);
+    const bool supported =
+        available()
+        && capabilities()
+               .value(QStringLiteral("fourFingerGestureEventsExperimental"))
+               .toBool();
 
-    connect(this, &HyprlandIpcBridge::experimentalSpatialGesturesArmedChanged,
-            &loop, [this, armed, &loop] {
-        if (m_experimentalSpatialGesturesArmed == armed)
-            loop.quit();
-    });
-    connect(&timer, &QTimer::timeout, &loop, &QEventLoop::quit);
-
-    synchronizeExperimentalSpatialGestures();
-
-    const int boundedTimeoutMs = std::max(0, timeoutMs);
-    if (boundedTimeoutMs > 0) {
-        timer.start(boundedTimeoutMs);
-        loop.exec();
+    if (!supported) {
+        setExperimentalSpatialGesturesArmed(false);
+        return !armed;
     }
 
-    return m_experimentalSpatialGesturesArmed == armed;
+    const int boundedTimeoutMs = std::max(0, timeoutMs);
+    if (boundedTimeoutMs <= 0)
+        return false;
+
+    // This path is used during shutdown, after QGuiApplication::exec() has
+    // returned. Do not spin a nested Qt event loop here: issue one bounded,
+    // synchronous local-socket request instead.
+    QElapsedTimer elapsed;
+    elapsed.start();
+
+    const auto remainingMs = [&elapsed, boundedTimeoutMs] {
+        return std::max(
+            1,
+            boundedTimeoutMs - static_cast<int>(elapsed.elapsed()));
+    };
+
+    QLocalSocket socket;
+    socket.connectToServer(m_commandSocketPath, QIODevice::ReadWrite);
+    if (!socket.waitForConnected(remainingMs()))
+        return false;
+
+    const QByteArray request =
+        QByteArrayLiteral("dispatch plugin:psd:gesture-events ")
+        + (armed ? QByteArrayLiteral("1") : QByteArrayLiteral("0"));
+
+    if (socket.write(request) < 0)
+        return false;
+    if (!socket.waitForBytesWritten(remainingMs()))
+        return false;
+    if (!socket.waitForReadyRead(remainingMs()))
+        return false;
+
+    QByteArray response = socket.readAll();
+    while (socket.waitForReadyRead(5))
+        response += socket.readAll();
+
+    const bool success =
+        QString::fromUtf8(response).trimmed() == QStringLiteral("ok");
+    if (!success)
+        return false;
+
+    setExperimentalSpatialGesturesArmed(armed);
+    return true;
 }
 
 void HyprlandIpcBridge::setExperimentalSpatialGesturesArmed(bool armed)
