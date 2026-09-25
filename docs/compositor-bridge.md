@@ -691,3 +691,21 @@ The probe requires:
 
 Once the observed screencopy vector is known, later transform coverage can
 tighten direction semantics and extend to additional transform values.
+
+
+#### Monitor-transform harness correction — CI #243
+
+CI #243 did not reach the rotated-output render probe. Hyprland accepted
+`monitor <name>,transform,1` but the live monitor remained at transform 0.
+
+The exact 0.53.3 parser explains this behavior: the special
+`<name>,transform,<n>` branch updates the matching stored monitor rule and
+returns immediately. It does not follow the normal full-rule path that parses
+mode, position, scale and transform together before monitor reconfiguration.
+
+The runtime now applies transforms with a complete monitor rule:
+
+`<name>,preferred,auto,<current-scale>,transform,<n>`
+
+and waits until `hyprctl monitors` reports the requested live transform.
+No PSD compositor/plugin semantics changed in this correction.

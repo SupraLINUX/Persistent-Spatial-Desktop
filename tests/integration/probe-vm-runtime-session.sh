@@ -289,7 +289,13 @@ wait_for_monitor_transform() {
 
 set_monitor_transform() {
     local transform="$1"
-    hyprctl keyword monitor "$monitor_name,transform,$transform" | grep -qx "ok"
+    local scale
+    scale="$(monitor_scale)"
+
+    # Hyprland 0.53.3's special "<name>,transform,<n>" parser path updates the
+    # stored rule but returns before applying/reloading the output. Use a full
+    # monitor rule so mode/position/scale/transform are committed immediately.
+    hyprctl keyword monitor "$monitor_name,preferred,auto,$scale,transform,$transform" | grep -qx "ok"
     wait_for_monitor_transform "$transform"
 }
 
