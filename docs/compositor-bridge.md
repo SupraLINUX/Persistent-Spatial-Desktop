@@ -608,3 +608,40 @@ The fractional legacy pass is temporarily diagnostic again so the dedicated
 pass can still execute after the internal values are captured. This
 instrumentation is intentionally non-architectural and should be removed or
 narrowed once the coordinate-space mismatch is resolved.
+
+
+### Fractional-scale plugin lifecycle correction — after CI #241
+
+CI #241 exposed the missing piece in the HiDPI investigation. Immediately
+before the child render probe, `hyprctl monitors` reported scale 1.6. Inside
+the plugin, after the child probe had performed its plugin load step, the same
+monitor was observed as scale 1.0 with logical size 1280x800 and pixel size
+1280x800. Both legacy and dedicated therefore moved 96 raster pixels.
+
+This means the earlier fractional tests were crossing a plugin/config lifecycle
+boundary between the monitor-scale measurement and the actual render-offset
+application. The scale seen by the plugin was no longer the scale captured by
+the harness.
+
+The runtime now loads the PSD plugin **before** applying fractional scale and
+keeps that same plugin instance loaded across both the legacy and dedicated
+fractional probes. The scale is changed only after plugin-load side effects have
+settled, so the test and plugin observe the same monitor state. The plugin is
+unloaded after the fractional block and also from cleanup on failure.
+
+Plugin 0.1.8 also removes the 0.1.7 `logicalOffset * monitorScale`
+conversion. Hyprland 0.53.3 keeps workspace/window positions and
+`m_renderOffset` / `m_floatingOffset` in logical layout coordinates; the
+renderer multiplies those coordinates by output scale later when building the
+rasterized surface and damage boxes. Multiplying in PSD would therefore apply
+scale twice once the plugin actually sees the fractional monitor state.
+
+The internal conversion diagnostic remains temporarily enabled for the next CI
+pass. The expected successful fractional diagnostic is approximately:
+
+- monitor scale: 1.6;
+- logical monitor size: 800x500;
+- pixel size: 1280x800;
+- logical/render requested offset: 96;
+- actual workspace offset after apply: 96;
+- screenshot correlation: approximately 154 pixels.

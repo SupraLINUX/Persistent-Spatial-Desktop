@@ -44,6 +44,7 @@ owns_runtime_dir=0
 log_file="${TMPDIR:-/tmp}/psd-hyprland-vm-runtime.log"
 hyprland_pid=""
 original_monitor_scale=""
+fractional_plugin_preloaded=0
 
 if [[ "${PSD_PROBE_USE_WAYLAND_BACKEND:-0}" == "1" ]]; then
     if [[ -z "${XDG_RUNTIME_DIR:-}" || -z "${WAYLAND_DISPLAY:-}" ]]; then
@@ -74,6 +75,11 @@ cleanup() {
 
     if [[ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" && -n "${monitor_name:-}" && -n "${original_monitor_scale:-}" ]]; then
         hyprctl keyword monitor "$monitor_name,preferred,auto,$original_monitor_scale" >/dev/null 2>&1 || true
+    fi
+
+    if [[ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" && "$fractional_plugin_preloaded" == "1" ]]; then
+        hyprctl plugin unload "$PLUGIN_PATH" >/dev/null 2>&1 || true
+        fractional_plugin_preloaded=0
     fi
 
     if [[ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ]]; then
@@ -272,30 +278,36 @@ PSD_RENDER_PROBE_BACKEND=dedicated \
     bash "$(dirname "$0")/probe-vm-render-transform.sh" "$test_client_path" "$PLUGIN_PATH"
 
 echo "PSD VM runtime probe: fractional-scale characterization begin requested=1.5"
+
+plugin_loaded="$(hyprctl -j plugin list | python3 -c 'import json,sys; d=json.load(sys.stdin); print(any(x.get("name")=="psd-hyprland-plugin" for x in d))')"
+if [[ "$plugin_loaded" != "True" ]]; then
+    hyprctl plugin load "$PLUGIN_PATH" | grep -qx "ok"
+    fractional_plugin_preloaded=1
+fi
+echo "PSD VM runtime probe: fractional plugin preloaded=$fractional_plugin_preloaded"
+
+# Apply fractional scale only after plugin load/config side effects have
+# settled. Both child probes then reuse the already-loaded plugin.
 fractional_scale="$(set_fractional_monitor_scale 1.5)"
 echo "PSD VM runtime probe: fractional-scale effective=$fractional_scale"
 
-fractional_legacy_status=0
-set +e
 PSD_RENDER_PROBE_BACKEND=legacy \
     bash "$(dirname "$0")/probe-vm-render-transform.sh" "$test_client_path" "$PLUGIN_PATH"
-fractional_legacy_status=$?
-set -e
-echo "PSD VM runtime probe: fractional legacy diagnostic status=$fractional_legacy_status effective=$fractional_scale"
-
-# The child probe may cause Hyprland to reapply its configured monitor rule
-# while unloading/reloading the experimental plugin. Reassert the effective
-# fractional scale before testing the dedicated backend.
-set_monitor_scale "$fractional_scale"
-echo "PSD VM runtime probe: fractional scale reasserted before dedicated=$fractional_scale"
+echo "PSD VM runtime probe: fractional legacy control PASS effective=$fractional_scale"
 
 PSD_RENDER_PROBE_BACKEND=dedicated \
     bash "$(dirname "$0")/probe-vm-render-transform.sh" "$test_client_path" "$PLUGIN_PATH"
 
-echo "PSD VM runtime probe: fractional-scale characterization PASS effective=$fractional_scale legacyStatus=$fractional_legacy_status"
+echo "PSD VM runtime probe: fractional-scale characterization PASS effective=$fractional_scale"
 
 set_monitor_scale "$original_monitor_scale"
 echo "PSD VM runtime probe: monitor scale restored to $original_monitor_scale"
+
+if [[ "$fractional_plugin_preloaded" == "1" ]]; then
+    hyprctl plugin unload "$PLUGIN_PATH" | grep -qx "ok"
+    fractional_plugin_preloaded=0
+    echo "PSD VM runtime probe: fractional plugin unloaded"
+fi
 
 bash "$(dirname "$0")/probe-vm-workspace-animation.sh" "$test_client_path" "$PLUGIN_PATH"
 

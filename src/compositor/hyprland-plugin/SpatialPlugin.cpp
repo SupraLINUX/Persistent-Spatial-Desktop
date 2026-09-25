@@ -112,10 +112,12 @@ Vector2D logicalOffsetToRenderUnits(
     const PHLMONITOR &monitor,
     const Vector2D &logicalOffset)
 {
-    if (!monitor)
-        return logicalOffset;
+    (void)monitor;
 
-    return logicalOffset * monitor->m_scale;
+    // Hyprland 0.53.3 stores window/workspace geometry and presentation
+    // offsets in logical layout coordinates. The renderer applies the output
+    // scale later when rasterizing surfaces and damage.
+    return logicalOffset;
 }
 
 Vector2D dedicatedOffsetForMonitor(const PHLMONITOR &monitor)
@@ -724,12 +726,12 @@ std::string capabilitiesResponse(eHyprCtlOutputFormat format, std::string)
 {
     if (format == FORMAT_JSON) {
         return std::format(
-            R"json({{"protocolVersion":3,"pluginVersion":"0.1.7","spatialRenderOffsetExperimental":true,"monitorTargeting":true,"fourFingerGestureEventsExperimental":true,"gestureEventsDefaultEnabled":false,"diagnosticStateQueryExperimental":true,"lifecycleEventsExperimental":true,"rigidFloatingNormalizationExperimental":true,"pinnedPresentationOffsetExperimental":true,"nativeWorkspaceAnimationDiagnosticsExperimental":true,"dedicatedPresentationOffsetExperimental":{}}})json",
+            R"json({{"protocolVersion":3,"pluginVersion":"0.1.8","spatialRenderOffsetExperimental":true,"monitorTargeting":true,"fourFingerGestureEventsExperimental":true,"gestureEventsDefaultEnabled":false,"diagnosticStateQueryExperimental":true,"lifecycleEventsExperimental":true,"rigidFloatingNormalizationExperimental":true,"pinnedPresentationOffsetExperimental":true,"nativeWorkspaceAnimationDiagnosticsExperimental":true,"dedicatedPresentationOffsetExperimental":{}}})json",
             g_dedicatedPresentationAvailable ? "true" : "false");
     }
 
     return std::format(
-        "protocolVersion=3 pluginVersion=0.1.7 spatialRenderOffsetExperimental=true monitorTargeting=true fourFingerGestureEventsExperimental=true gestureEventsDefaultEnabled=false diagnosticStateQueryExperimental=true lifecycleEventsExperimental=true rigidFloatingNormalizationExperimental=true pinnedPresentationOffsetExperimental=true nativeWorkspaceAnimationDiagnosticsExperimental=true dedicatedPresentationOffsetExperimental={}",
+        "protocolVersion=3 pluginVersion=0.1.8 spatialRenderOffsetExperimental=true monitorTargeting=true fourFingerGestureEventsExperimental=true gestureEventsDefaultEnabled=false diagnosticStateQueryExperimental=true lifecycleEventsExperimental=true rigidFloatingNormalizationExperimental=true pinnedPresentationOffsetExperimental=true nativeWorkspaceAnimationDiagnosticsExperimental=true dedicatedPresentationOffsetExperimental={}",
         g_dedicatedPresentationAvailable ? "true" : "false");
 }
 
@@ -1058,7 +1060,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle)
         "psd-hyprland-plugin",
         "Persistent Spatial Desktop compositor integration experiment",
         "SupraLINUX",
-        "0.1.7",
+        "0.1.8",
     };
 }
 
