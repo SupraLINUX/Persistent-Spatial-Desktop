@@ -442,14 +442,18 @@ scanout, especially the NVIDIA path, remains a later hardware validation item.
 
 ### Fractional-scale characterization
 
-The next CI characterization reuses the complete dedicated render suite at
-monitor scale 1.5 rather than introducing a reduced special-case test. The
-existing probe derives physical translation from the live monitor scale, so
-the standard 96-logical-unit displacement must correlate at 144 physical
-pixels.
+The CI characterization reuses the complete dedicated render suite under a
+fractional monitor scale rather than introducing a reduced special-case test.
 
-This pass therefore covers tiled, floating and pinned windows, xdg_popup,
-wl_subsurface, compositor decorations, damage/event-driven behavior and the
+PSD geometry is defined in logical units. Screenshot validation therefore
+normalizes `grim` to image scale 1, producing one PNG pixel per Wayland layout
+unit. Under that normalized capture a standard 96-logical-unit PSD displacement
+must correlate as 96 screenshot pixels regardless of the monitor's effective
+scale. The compositor/output pipeline remains responsible for mapping those
+logical units to physical DRM pixels.
+
+This pass covers tiled, floating and pinned windows, xdg_popup, wl_subsurface,
+compositor decorations, damage/event-driven behavior and the
 fullscreen/direct-scanout guard under fractional scaling. The runtime restores
 the original monitor scale before continuing with later probes and also
 restores it from the cleanup trap on failure.
@@ -485,6 +489,29 @@ nearest scale that is a clean divisor. For 1280x800, scale 1.6 yields an exact
 The CI therefore no longer assumes that the requested fractional scale is the
 effective one. It requests 1.5, waits for Hyprland to settle on a scale that is
 both different from the original and genuinely fractional, records that live
-effective value, and then runs the complete dedicated render suite. The render
-probe already derives physical displacement from the live monitor scale, so
-its pixel expectations automatically follow Hyprland's accepted scale.
+effective value, and then runs the complete dedicated render suite. Pixel
+correlation is performed in normalized logical screenshot coordinates, not by
+multiplying the PSD offset by the monitor scale.
+
+
+#### Fractional-scale coordinate checkpoint — CI #236
+
+CI #236 reached the complete dedicated render suite at effective scale 1.6.
+The first tiled case rendered a coherent 96-unit translation with overlap
+1.000, while the probe expected 154 because it had multiplied the logical PSD
+offset by the monitor scale.
+
+That expectation mixed two coordinate systems. `grim` has its own output
+image scale, and fractional-output geometry is represented through xdg-output.
+Raw PNG coordinates are therefore not a stable synonym for DRM physical
+pixels.
+
+The probe now captures with `grim -s 1` and verifies the resulting PNG
+dimensions against `pixelSize / effectiveScale`. This gives a deterministic
+logical-coordinate raster: on the current 1280x800 QEMU output at scale 1.6,
+the normalized image must be 800x500. All render-offset assertions then compare
+the 96 logical PSD units against 96 normalized screenshot pixels.
+
+No compositor/backend code changed in this correction. The purpose is to test
+the unit contract PSD actually exposes rather than an incidental screenshot
+tool scale.

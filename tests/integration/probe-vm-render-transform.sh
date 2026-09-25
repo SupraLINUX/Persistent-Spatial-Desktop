@@ -252,8 +252,34 @@ print(f"{int(at[0])},{int(at[1])},{int(size[0])},{int(size[1])}")
 
 capture_output() {
     local path="$1"
-    grim -o "$monitor_name" "$path"
+
+    # Normalize screencopy to one image pixel per Wayland layout/logical unit.
+    # grim otherwise chooses an output image scale independently, which makes
+    # fractional-scale PNG coordinates unsuitable for direct PSD geometry
+    # correlation.
+    grim -s 1 -o "$monitor_name" "$path"
     [[ -s "$path" ]]
+
+    python3 - "$path" "$monitor_width" "$monitor_height" "$monitor_scale" <<'PY' >/dev/null
+from PIL import Image
+import sys
+
+image = Image.open(sys.argv[1])
+pixel_width = int(sys.argv[2])
+pixel_height = int(sys.argv[3])
+scale = float(sys.argv[4])
+
+expected = (
+    round(pixel_width / scale),
+    round(pixel_height / scale),
+)
+
+if image.size != expected:
+    raise SystemExit(
+        "PSD render probe: normalized screenshot dimensions mismatch "
+        f"actual={image.size} expected={expected} scale={scale}"
+    )
+PY
 }
 
 assert_pixel_translation() {
@@ -731,13 +757,8 @@ PY
         logical_offset=-96
     fi
 
-    local physical_offset
-    physical_offset="$(
-        python3 - "$logical_offset" "$monitor_scale" <<'PY'
-import sys
-print(round(float(sys.argv[1]) * float(sys.argv[2])))
-PY
-    )"
+    local screenshot_offset
+    screenshot_offset="$logical_offset"
 
     local baseline="$work_dir/$mode-baseline.png"
     local shifted="$work_dir/$mode-shifted.png"
@@ -867,7 +888,7 @@ PY
     fi
 
     capture_output "$shifted"
-    assert_pixel_translation "$baseline" "$shifted" "$physical_offset" "$mode"
+    assert_pixel_translation "$baseline" "$shifted" "$screenshot_offset" "$mode"
 
     reset_transform | grep -qx "ok"
     sleep 0.2
@@ -1011,13 +1032,8 @@ PY
     geometry_before="$(client_geometry "$target_title")"
 
     local logical_offset=96
-    local physical_offset
-    physical_offset="$(
-        python3 - "$logical_offset" "$monitor_scale" <<'PY'
-import sys
-print(round(float(sys.argv[1]) * float(sys.argv[2])))
-PY
-    )"
+    local screenshot_offset
+    screenshot_offset="$logical_offset"
 
     apply_transform "$logical_offset" | grep -qx "ok"
     sleep 0.2
@@ -1059,7 +1075,7 @@ PY
     fi
 
     capture_output "$shifted"
-    assert_pixel_translation "$baseline" "$shifted" "$physical_offset" "$mode"
+    assert_pixel_translation "$baseline" "$shifted" "$screenshot_offset" "$mode"
 
     reset_transform | grep -qx "ok"
     sleep 0.2
@@ -1197,13 +1213,8 @@ PY
     geometry_before="$(client_geometry "$target_title")"
 
     local logical_offset=96
-    local physical_offset
-    physical_offset="$(
-        python3 - "$logical_offset" "$monitor_scale" <<'PY'
-import sys
-print(round(float(sys.argv[1]) * float(sys.argv[2])))
-PY
-    )"
+    local screenshot_offset
+    screenshot_offset="$logical_offset"
 
     apply_transform "$logical_offset" | grep -qx "ok"
     sleep 0.2
@@ -1245,7 +1256,7 @@ PY
     fi
 
     capture_output "$shifted"
-    assert_pixel_translation "$baseline" "$shifted" "$physical_offset" "$mode"
+    assert_pixel_translation "$baseline" "$shifted" "$screenshot_offset" "$mode"
 
     reset_transform | grep -qx "ok"
     sleep 0.2
@@ -1336,13 +1347,8 @@ PY
     geometry_before="$(client_geometry "$target_title")"
 
     local logical_offset=96
-    local physical_offset
-    physical_offset="$(
-        python3 - "$logical_offset" "$monitor_scale" <<'PY'
-import sys
-print(round(float(sys.argv[1]) * float(sys.argv[2])))
-PY
-    )"
+    local screenshot_offset
+    screenshot_offset="$logical_offset"
 
     capture_output "$baseline"
     assert_decoration_translation "$baseline" "$baseline" 0 "$mode baseline"
@@ -1387,7 +1393,7 @@ PY
     fi
 
     capture_output "$shifted"
-    assert_decoration_translation "$baseline" "$shifted" "$physical_offset" "$mode"
+    assert_decoration_translation "$baseline" "$shifted" "$screenshot_offset" "$mode"
 
     reset_transform | grep -qx "ok"
     sleep 0.2
@@ -1475,13 +1481,8 @@ PY
     geometry_before="$(client_geometry "$target_title")"
 
     local logical_offset=96
-    local physical_offset
-    physical_offset="$(
-        python3 - "$logical_offset" "$monitor_scale" <<'PY'
-import sys
-print(round(float(sys.argv[1]) * float(sys.argv[2])))
-PY
-    )"
+    local screenshot_offset
+    screenshot_offset="$logical_offset"
 
     capture_output "$baseline"
     wait_for_counter_quiet "monitorRenderCounts" "$mode baseline render"
@@ -1511,7 +1512,7 @@ PY
     fi
 
     capture_output "$shifted"
-    assert_damage_cleanup "$baseline" "$shifted" "$physical_offset" "$mode apply"
+    assert_damage_cleanup "$baseline" "$shifted" "$screenshot_offset" "$mode apply"
 
     wait_for_counter_quiet "monitorRenderCounts" "$mode shifted screenshot settle"
 
@@ -1532,7 +1533,7 @@ PY
         "monitorRenderCounts" "$mode reset render"
 
     capture_output "$restored"
-    assert_damage_cleanup "$shifted" "$restored" "$((-physical_offset))" "$mode reset"
+    assert_damage_cleanup "$shifted" "$restored" "$((-screenshot_offset))" "$mode reset"
 
     kill -TERM "$target_pid" >/dev/null 2>&1 || true
     wait "$target_pid" >/dev/null 2>&1 || true
