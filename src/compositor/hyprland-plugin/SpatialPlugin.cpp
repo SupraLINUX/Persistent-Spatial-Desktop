@@ -95,6 +95,16 @@ bool workspaceHasExplicitFullscreen(const PHLWORKSPACE &workspace)
     return window && window->isEffectiveInternalFSMode(FSMODE_FULLSCREEN);
 }
 
+Vector2D logicalOffsetToRenderUnits(
+    const PHLMONITOR &monitor,
+    const Vector2D &logicalOffset)
+{
+    if (!monitor)
+        return logicalOffset;
+
+    return logicalOffset * monitor->m_scale;
+}
+
 Vector2D dedicatedOffsetForMonitor(const PHLMONITOR &monitor)
 {
     if (!monitor)
@@ -120,10 +130,12 @@ void renderWindowWithDedicatedOffset(
     if (!g_originalRenderWindow)
         return;
 
-    const Vector2D psdOffset =
+    const Vector2D logicalPsdOffset =
         (!standalone && window && monitor)
         ? dedicatedOffsetForMonitor(monitor)
         : Vector2D{};
+    const Vector2D psdOffset =
+        logicalOffsetToRenderUnits(monitor, logicalPsdOffset);
 
     if (psdOffset == Vector2D{}) {
         g_originalRenderWindow(
@@ -373,15 +385,18 @@ void rememberWorkspace(const PHLWORKSPACE &workspace)
         g_touchedWorkspaces.emplace_back(workspace);
 }
 
-void applyOffset(const PHLWORKSPACE &workspace, const Vector2D &offset)
+void applyOffset(const PHLWORKSPACE &workspace, const Vector2D &logicalOffset)
 {
     if (!workspace || !workspace->m_renderOffset)
         return;
 
-    rememberWorkspace(workspace);
-    workspace->m_renderOffset->setValueAndWarp(offset);
-
     const auto monitor = workspace->m_monitor.lock();
+    const Vector2D renderOffset =
+        logicalOffsetToRenderUnits(monitor, logicalOffset);
+
+    rememberWorkspace(workspace);
+    workspace->m_renderOffset->setValueAndWarp(renderOffset);
+
     if (monitor)
         g_pHyprRenderer->damageMonitor(monitor);
 }
@@ -436,6 +451,9 @@ void applyPresentationWindows(
             window->m_floatingOffset = Vector2D{};
     }
 
+    const Vector2D renderOffset =
+        logicalOffsetToRenderUnits(monitor, offset);
+
     std::vector<PresentationWindowTransform> next;
     next.reserve(state.presentationWindows.size() + 4);
 
@@ -444,7 +462,8 @@ void applyPresentationWindows(
             continue;
 
         const Vector2D observedBefore = window->m_floatingOffset;
-        const Vector2D appliedOffset = window->m_pinned ? offset : Vector2D{};
+        const Vector2D appliedOffset =
+            window->m_pinned ? renderOffset : Vector2D{};
 
         window->m_floatingOffset = appliedOffset;
         next.push_back({
@@ -681,12 +700,12 @@ std::string capabilitiesResponse(eHyprCtlOutputFormat format, std::string)
 {
     if (format == FORMAT_JSON) {
         return std::format(
-            R"json({{"protocolVersion":3,"pluginVersion":"0.1.6","spatialRenderOffsetExperimental":true,"monitorTargeting":true,"fourFingerGestureEventsExperimental":true,"gestureEventsDefaultEnabled":false,"diagnosticStateQueryExperimental":true,"lifecycleEventsExperimental":true,"rigidFloatingNormalizationExperimental":true,"pinnedPresentationOffsetExperimental":true,"nativeWorkspaceAnimationDiagnosticsExperimental":true,"dedicatedPresentationOffsetExperimental":{}}})json",
+            R"json({{"protocolVersion":3,"pluginVersion":"0.1.7","spatialRenderOffsetExperimental":true,"monitorTargeting":true,"fourFingerGestureEventsExperimental":true,"gestureEventsDefaultEnabled":false,"diagnosticStateQueryExperimental":true,"lifecycleEventsExperimental":true,"rigidFloatingNormalizationExperimental":true,"pinnedPresentationOffsetExperimental":true,"nativeWorkspaceAnimationDiagnosticsExperimental":true,"dedicatedPresentationOffsetExperimental":{}}})json",
             g_dedicatedPresentationAvailable ? "true" : "false");
     }
 
     return std::format(
-        "protocolVersion=3 pluginVersion=0.1.6 spatialRenderOffsetExperimental=true monitorTargeting=true fourFingerGestureEventsExperimental=true gestureEventsDefaultEnabled=false diagnosticStateQueryExperimental=true lifecycleEventsExperimental=true rigidFloatingNormalizationExperimental=true pinnedPresentationOffsetExperimental=true nativeWorkspaceAnimationDiagnosticsExperimental=true dedicatedPresentationOffsetExperimental={}",
+        "protocolVersion=3 pluginVersion=0.1.7 spatialRenderOffsetExperimental=true monitorTargeting=true fourFingerGestureEventsExperimental=true gestureEventsDefaultEnabled=false diagnosticStateQueryExperimental=true lifecycleEventsExperimental=true rigidFloatingNormalizationExperimental=true pinnedPresentationOffsetExperimental=true nativeWorkspaceAnimationDiagnosticsExperimental=true dedicatedPresentationOffsetExperimental={}",
         g_dedicatedPresentationAvailable ? "true" : "false");
 }
 
@@ -994,7 +1013,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle)
         "psd-hyprland-plugin",
         "Persistent Spatial Desktop compositor integration experiment",
         "SupraLINUX",
-        "0.1.6",
+        "0.1.7",
     };
 }
 

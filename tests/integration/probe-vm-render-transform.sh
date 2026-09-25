@@ -880,13 +880,15 @@ else:
 PY
 
     if [[ "$RENDER_BACKEND" == "legacy" && "$mode" != "tiled" ]]; then
-        python3 - "$compositor_state" "$mode" "$logical_offset" <<'PY'
+        python3 - "$compositor_state" "$mode" "$logical_offset" "$monitor_scale" <<'PY'
 import json
 import sys
 
 state = json.loads(sys.argv[1])
 mode = sys.argv[2]
-expected = float(sys.argv[3])
+logical_expected = float(sys.argv[3])
+monitor_scale = float(sys.argv[4])
+expected = logical_expected * monitor_scale
 entries = state.get("presentationOffsets", [])
 want_pinned = mode == "pinned"
 entries = [entry for entry in entries if bool(entry.get("pinned")) == want_pinned]

@@ -550,3 +550,40 @@ The xdg_popup and wl_subsurface cases now declare their calibration inputs
 before their first baseline capture. The tiled/floating/pinned, decoration and
 damage cases were already ordered correctly. No compositor/backend behavior
 changed in this correction.
+
+
+### Fractional-scale unit conversion — after CI #239
+
+CI #239 finally produced a controlled fractional-scale result. At effective
+monitor scale 1.6, the screenshot calibration measured
+`screenshotPxPerLogical=1.6`. The legacy tiled control received a PSD offset
+of 96 logical units but moved only 96 screenshot pixels; the expected logical
+distance was 154 screenshot pixels. This localizes a real unit mismatch between
+PSD's logical geometry contract and the render-offset values passed into
+Hyprland.
+
+PSD's runtime computes spatial destinations from Qt screen/layout geometry and
+`SpatialCompositorSync` forwards those offsets unchanged to the compositor.
+The plugin API therefore remains logical-unit based.
+
+Plugin 0.1.7 converts logical PSD offsets to Hyprland render units internally
+using the target monitor's live scale:
+
+`renderOffset = logicalOffset * monitorScale`.
+
+The conversion is applied to both experimental paths:
+
+- legacy workspace `m_renderOffset`;
+- pinned legacy `m_floatingOffset` compensation;
+- dedicated render-time `m_floatingOffset` composition.
+
+The dedicated path performs the conversion inside each `renderWindow()` call,
+so an already-stored logical offset automatically follows the monitor's current
+scale without rewriting plugin state. Diagnostic
+`dedicatedPresentationOffsets` continues to expose the original logical
+values.
+
+The fractional CI now requires the legacy control to pass instead of accepting
+its failure, then explicitly reapplies the effective fractional monitor scale
+before launching the dedicated probe. This prevents plugin lifecycle/config
+reload effects from silently returning the dedicated pass to scale 1.0.
