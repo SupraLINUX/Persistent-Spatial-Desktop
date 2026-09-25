@@ -947,3 +947,77 @@ The Ubuntu mock failure in CI #249 was independent: its mocked gesture
 dispatcher parsed the value from argument 4 even though
 `dispatch plugin:psd:gesture-events 1` places it in argument 3. The fixture
 now matches the actual command shape.
+
+
+### Gesture runtime checkpoint — CI #250
+
+CI #250 passed all three jobs after the teardown-order correction:
+
+- `hyprland-plugin-26-04`: PASS;
+- `ubuntu-26-04`: PASS;
+- `ubuntu-26-04-qemu`: PASS.
+
+The real uinput four-finger path auto-armed from the normal PSD runtime,
+generated 11 gesture updates and a non-zero shell-generated spatial offset,
+then shut down with both the final compositor reset and gesture subscription
+disarm confirmed.
+
+The #250 QEMU timing sample was:
+
+- swipe hook -> shell compositor command: **33.253 ms**;
+- compositor command -> monitor preRender: **0.641 ms**;
+- hook -> preRender: **33.894 ms**.
+
+Together with #248 (~40.0 ms) and #249 (~14.4 ms), this confirms causal
+end-to-end operation but also shows that virtualized scheduling variance is too
+large to derive a product latency budget from QEMU. Physical touchpad/GPU
+measurements remain required for latency acceptance criteria.
+
+### Physical NVIDIA / direct-scanout / VRR probe
+
+QEMU cannot prove active adaptive sync or DRM zero-copy scanout. The remaining
+hardware-only validation is represented by
+`tests/integration/probe-hardware-nvidia.sh`. It is intentionally manual and
+is never executed by CI.
+
+The probe is strict by default:
+
+- Hyprland must report version 0.53.3 and the DRM backend;
+- the PSD plugin must report protocol 3, plugin 0.1.10 and the dedicated
+  presentation capability;
+- `nvidia-smi` must report an NVIDIA GPU;
+- `nvidia_drm` modesetting must be active;
+- the selected Hyprland monitor must map to a real
+  `/sys/class/drm/card*-<monitor>` connector whose PCI driver is NVIDIA;
+- mirrored outputs are rejected;
+- the user must provide the explicit
+  `PSD_HW_CONFIRM=I_UNDERSTAND_DISPLAY_MAY_FLICKER` opt-in.
+
+The probe stores and restores the runtime `render:direct_scanout` value. It
+does **not** rewrite monitor rules or force VRR, because doing so could destroy
+unreconstructable user monitor configuration. VRR must already become active
+through the normal Hyprland configuration to certify that path.
+
+The hardware sequence is:
+
+1. apply a non-zero dedicated PSD presentation offset;
+2. open the deterministic integration client in explicit fullscreen;
+3. require the fullscreen callback to clear the PSD offset;
+4. require new PSD offsets to be rejected while fullscreen is active;
+5. wait for a non-zero Hyprland `directScanoutTo` value;
+6. record `directScanoutBlockedBy` and live VRR state;
+7. by default require `vrr=true` while real direct scanout is active;
+8. verify the refused PSD offset does not knock the output out of scanout;
+9. close fullscreen, require direct scanout to clear and require no stale PSD
+   offset to return;
+10. apply/reset a new dedicated offset after fullscreen to prove recovery.
+
+If `directScanoutTo` never becomes non-zero, the script exits as
+**not certified** and prints Hyprland's exact blocker set. In 0.53.3 the
+reported blocker categories include `USER`, `RECORD`, `SW`,
+`CANDIDATE`, `SURFACE`, `TRANSFORM`, `DMA`, `FAILED` and `CM`.
+This distinguishes a PSD regression from a client/driver/output that was never
+eligible for zero-copy scanout.
+
+`PSD_HW_REQUIRE_VRR=0` permits a partial direct-scanout-only run, but that
+does not close the physical VRR requirement.
