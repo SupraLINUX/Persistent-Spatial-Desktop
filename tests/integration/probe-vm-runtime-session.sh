@@ -44,7 +44,9 @@ owns_runtime_dir=0
 log_file="${TMPDIR:-/tmp}/psd-hyprland-vm-runtime.log"
 hyprland_pid=""
 original_monitor_scale=""
+original_monitor_transform=""
 fractional_plugin_preloaded=0
+transform_plugin_preloaded=0
 
 if [[ "${PSD_PROBE_USE_WAYLAND_BACKEND:-0}" == "1" ]]; then
     if [[ -z "${XDG_RUNTIME_DIR:-}" || -z "${WAYLAND_DISPLAY:-}" ]]; then
@@ -73,8 +75,13 @@ fi
 cleanup() {
     set +e
 
-    if [[ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" && -n "${monitor_name:-}" && -n "${original_monitor_scale:-}" ]]; then
-        hyprctl keyword monitor "$monitor_name,preferred,auto,$original_monitor_scale" >/dev/null 2>&1 || true
+    if [[ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" && -n "${monitor_name:-}" && -n "${original_monitor_scale:-}" && -n "${original_monitor_transform:-}" ]]; then
+        hyprctl keyword monitor "$monitor_name,preferred,auto,$original_monitor_scale,transform,$original_monitor_transform" >/dev/null 2>&1 || true
+    fi
+
+    if [[ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" && "$transform_plugin_preloaded" == "1" ]]; then
+        hyprctl plugin unload "$PLUGIN_PATH" >/dev/null 2>&1 || true
+        transform_plugin_preloaded=0
     fi
 
     if [[ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" && "$fractional_plugin_preloaded" == "1" ]]; then
@@ -163,6 +170,20 @@ print(float(monitor.get("scale", 1.0) or 1.0))
 PY
 )"
 
+original_monitor_transform="$(
+    python3 - "$monitor_json" "$monitor_name" <<'PY'
+import json
+import sys
+
+monitors = json.loads(sys.argv[1])
+name = sys.argv[2]
+monitor = next((item for item in monitors if item.get("name") == name), None)
+if monitor is None:
+    raise SystemExit(1)
+print(int(monitor.get("transform", 0) or 0))
+PY
+)"
+
 echo "PSD VM runtime probe: using guest DRM render node(s):"
 ls -l /dev/dri/renderD*
 echo "PSD VM runtime probe: using Hyprland output $monitor_name scale=$original_monitor_scale"
@@ -231,6 +252,45 @@ set_monitor_scale() {
     local scale="$1"
     hyprctl keyword monitor "$monitor_name,preferred,auto,$scale" | grep -qx "ok"
     wait_for_monitor_scale "$scale"
+}
+
+monitor_transform() {
+    local monitors_json
+    monitors_json="$(hyprctl -j monitors)"
+    python3 - "$monitors_json" "$monitor_name" <<'PY'
+import json
+import sys
+
+monitors = json.loads(sys.argv[1])
+name = sys.argv[2]
+monitor = next((item for item in monitors if item.get("name") == name), None)
+if monitor is None:
+    raise SystemExit(1)
+print(int(monitor.get("transform", 0) or 0))
+PY
+}
+
+wait_for_monitor_transform() {
+    local expected="$1"
+
+    for _ in $(seq 1 80); do
+        local actual
+        actual="$(monitor_transform)"
+        if [[ "$actual" == "$expected" ]]; then
+            return 0
+        fi
+        sleep 0.05
+    done
+
+    echo "PSD VM runtime probe: monitor $monitor_name did not reach transform=$expected" >&2
+    hyprctl -j monitors >&2 || true
+    return 1
+}
+
+set_monitor_transform() {
+    local transform="$1"
+    hyprctl keyword monitor "$monitor_name,transform,$transform" | grep -qx "ok"
+    wait_for_monitor_transform "$transform"
 }
 
 set_fractional_monitor_scale() {
@@ -308,6 +368,32 @@ if [[ "$fractional_plugin_preloaded" == "1" ]]; then
     fractional_plugin_preloaded=0
     echo "PSD VM runtime probe: fractional plugin unloaded"
 fi
+
+echo "PSD VM runtime probe: monitor-transform characterization begin transform=1"
+
+plugin_loaded="$(hyprctl -j plugin list | python3 -c 'import json,sys; d=json.load(sys.stdin); print(any(x.get("name")=="psd-hyprland-plugin" for x in d))')"
+if [[ "$plugin_loaded" != "True" ]]; then
+    hyprctl plugin load "$PLUGIN_PATH" | grep -qx "ok"
+    transform_plugin_preloaded=1
+fi
+
+set_monitor_transform 1
+echo "PSD VM runtime probe: monitor transform effective=1"
+
+PSD_RENDER_PROBE_BACKEND=dedicated \
+PSD_RENDER_PROBE_TRANSFORM_ONLY=1 \
+    bash "$(dirname "$0")/probe-vm-render-transform.sh" "$test_client_path" "$PLUGIN_PATH"
+
+set_monitor_transform "$original_monitor_transform"
+echo "PSD VM runtime probe: monitor transform restored to $original_monitor_transform"
+
+if [[ "$transform_plugin_preloaded" == "1" ]]; then
+    hyprctl plugin unload "$PLUGIN_PATH" | grep -qx "ok"
+    transform_plugin_preloaded=0
+    echo "PSD VM runtime probe: transform plugin unloaded"
+fi
+
+echo "PSD VM runtime probe: monitor-transform characterization PASS transform=1"
 
 bash "$(dirname "$0")/probe-vm-workspace-animation.sh" "$test_client_path" "$PLUGIN_PATH"
 

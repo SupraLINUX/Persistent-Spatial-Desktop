@@ -645,3 +645,49 @@ pass. The expected successful fractional diagnostic is approximately:
 - logical/render requested offset: 96;
 - actual workspace offset after apply: 96;
 - screenshot correlation: approximately 154 pixels.
+
+
+### Fractional-scale checkpoint — CI #242
+
+CI #242 closed the fractional-scale characterization. After loading the plugin
+before changing monitor scale, both the harness and the plugin observed the
+same output state:
+
+- effective scale 1.6;
+- logical monitor size 800x500;
+- pixel size 1280x800;
+- PSD offset stored and applied as 96 logical units.
+
+At scale 1.6, `grim -s 1` produced an 800x500 logical-coordinate image.
+Legacy tiled/floating/pinned all passed. The dedicated backend also passed
+tiled/floating/pinned, xdg_popup, wl_subsurface, compositor decorations,
+damage/event-driven checks, and the fullscreen/direct-scanout guard.
+
+The observed tiled displacement was 98 screenshot pixels rather than exactly
+96 because of raster/mask edge sampling, with overlap 0.999; the probe's
+existing tolerance accepted it. Other dedicated cases were 94–97 pixels with
+overlap 1.000. This is consistent with the logical-coordinate contract and the
+fractional rasterization boundary.
+
+The temporary internal HiDPI conversion diagnostic has now been removed.
+Plugin 0.1.9 keeps PSD offsets in Hyprland logical layout coordinates and does
+not apply an extra monitor-scale multiplication.
+
+### Monitor-transform characterization
+
+The next CI checkpoint targets a 90-degree output transform
+(`transform=1`) at scale 1.0. Because screencopy orientation may map a
+logical horizontal displacement onto either PNG axis, this first
+characterization intentionally validates the translation vector magnitude
+rather than hard-coding X/Y orientation.
+
+A compact floating dedicated-backend client is displaced by 96 logical units.
+The probe requires:
+
+- unchanged Hyprland logical window geometry;
+- stable deterministic pixel area;
+- a screenshot-mask translation vector with magnitude approximately 96 pixels;
+- reset returning the vector magnitude to zero.
+
+Once the observed screencopy vector is known, later transform coverage can
+tighten direction semantics and extend to additional transform values.

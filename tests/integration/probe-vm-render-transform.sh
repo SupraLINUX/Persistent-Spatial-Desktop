@@ -61,9 +61,22 @@ print(
 PY
 )
 
-if [[ "$monitor_transform" != "0" ]]; then
-    echo "PSD render probe: VM pixel validation currently requires transform=0, got $monitor_transform" >&2
-    exit 1
+transform_only="${PSD_RENDER_PROBE_TRANSFORM_ONLY:-0}"
+
+if [[ "$transform_only" == "1" ]]; then
+    if [[ "$RENDER_BACKEND" != "dedicated" ]]; then
+        echo "PSD render probe: transform-only characterization requires dedicated backend." >&2
+        exit 1
+    fi
+    if [[ "$monitor_transform" == "0" ]]; then
+        echo "PSD render probe: transform-only characterization requires a non-zero monitor transform." >&2
+        exit 1
+    fi
+else
+    if [[ "$monitor_transform" != "0" ]]; then
+        echo "PSD render probe: full pixel suite currently requires transform=0, got $monitor_transform" >&2
+        exit 1
+    fi
 fi
 
 original_workspace_selector="$original_workspace"
@@ -138,7 +151,7 @@ import sys
 
 data = json.loads(sys.argv[1])
 assert data["protocolVersion"] == 3, data
-assert data["pluginVersion"] == "0.1.8", data
+assert data["pluginVersion"] == "0.1.9", data
 assert data["spatialRenderOffsetExperimental"] is True, data
 assert data["monitorTargeting"] is True, data
 backend = sys.argv[2]
@@ -406,6 +419,75 @@ PY
 }
 
 
+assert_translation_vector_magnitude() {
+    local baseline="$1"
+    local candidate="$2"
+    local expected_magnitude="$3"
+    local label="$4"
+
+    python3 - "$baseline" "$candidate" "$expected_magnitude" "$label" <<'PY'
+from PIL import Image
+import math
+import sys
+
+baseline_path, candidate_path = sys.argv[1], sys.argv[2]
+expected = float(sys.argv[3])
+label = sys.argv[4]
+target = (22, 242, 122)
+
+def mask_stats(path):
+    image = Image.open(path).convert("RGB")
+    pixels = image.load()
+    xs = []
+    ys = []
+    for y in range(image.height):
+        for x in range(image.width):
+            r, g, b = pixels[x, y]
+            if (
+                abs(r - target[0]) <= 3
+                and abs(g - target[1]) <= 3
+                and abs(b - target[2]) <= 3
+            ):
+                xs.append(x)
+                ys.append(y)
+
+    if len(xs) < 4000:
+        raise SystemExit(f"{label}: too few target pixels ({len(xs)}) in {path}")
+
+    return {
+        "count": len(xs),
+        "bbox": (min(xs), min(ys), max(xs), max(ys)),
+        "cx": (min(xs) + max(xs)) / 2.0,
+        "cy": (min(ys) + max(ys)) / 2.0,
+    }
+
+a = mask_stats(baseline_path)
+b = mask_stats(candidate_path)
+
+dx = b["cx"] - a["cx"]
+dy = b["cy"] - a["cy"]
+magnitude = math.hypot(dx, dy)
+count_ratio = b["count"] / a["count"]
+
+if abs(magnitude - expected) > 4.0:
+    raise SystemExit(
+        f"{label}: expected translation magnitude {expected:.1f}, "
+        f"observed vector=({dx:.1f},{dy:.1f}) magnitude={magnitude:.2f} "
+        f"baselineBBox={a['bbox']} candidateBBox={b['bbox']}"
+    )
+
+if not 0.96 <= count_ratio <= 1.04:
+    raise SystemExit(
+        f"{label}: target pixel count changed too much "
+        f"baseline={a['count']} candidate={b['count']} ratio={count_ratio:.4f}"
+    )
+
+print(
+    f"PSD render probe: {label} vector=({dx:.1f},{dy:.1f}) "
+    f"magnitude={magnitude:.2f}px countRatio={count_ratio:.4f} PASS"
+)
+PY
+}
 
 state_counter() {
     local field="$1"
@@ -815,33 +897,6 @@ PY
     local client_state
     compositor_state="$(hyprctl -j psd-plugin-state)"
     client_state="$(hyprctl -j clients)"
-
-    if [[ "$RENDER_BACKEND" == "legacy" ]]; then
-        python3 - "$compositor_state" "$mode" <<'PY'
-import json
-import sys
-
-state = json.loads(sys.argv[1])
-mode = sys.argv[2]
-diag = state.get("lastLegacyOffsetConversion")
-if not diag:
-    raise SystemExit(
-        f"PSD render probe: {mode} missing legacy conversion diagnostic: {state}"
-    )
-
-print(
-    "PSD render probe: "
-    f"{mode} legacy conversion diagnostic "
-    f"monitor={diag.get('monitor')} "
-    f"scale={diag.get('monitorScale')} "
-    f"size=({diag.get('monitorSizeX')},{diag.get('monitorSizeY')}) "
-    f"pixelSize=({diag.get('monitorPixelSizeX')},{diag.get('monitorPixelSizeY')}) "
-    f"logical=({diag.get('logicalRequestedX')},{diag.get('logicalRequestedY')}) "
-    f"render=({diag.get('renderRequestedX')},{diag.get('renderRequestedY')}) "
-    f"actualAfterApply=({diag.get('actualAfterApplyX')},{diag.get('actualAfterApplyY')})"
-)
-PY
-    fi
 
     python3 - "$compositor_state" "$client_state" "$mode" "$target_title" "$logical_offset" "$RENDER_BACKEND" "$monitor_name" <<'PY'
 import json
@@ -1619,6 +1674,79 @@ PY
 }
 
 
+run_monitor_transform_case() {
+    if [[ "$transform_only" != "1" ]]; then
+        return
+    fi
+
+    local mode="monitor-transform"
+    local target_title="psd-render-${mode}-${BASHPID}"
+    local target_pid=""
+    local logical_offset=96
+    local baseline="$work_dir/$mode-baseline.png"
+    local shifted="$work_dir/$mode-shifted.png"
+    local restored="$work_dir/$mode-restored.png"
+
+    reset_transform | grep -qx "ok"
+
+    "$CLIENT_PATH"         --title "$target_title"         --color "#16f27a"         >"$work_dir/$mode-client.log" 2>&1 &
+    target_pid=$!
+    client_pids+=("$target_pid")
+
+    if ! wait_for_client "$target_title" 0 0; then
+        echo "PSD render probe: transformed target did not map." >&2
+        hyprctl -j clients >&2 || true
+        exit 1
+    fi
+
+    hyprctl dispatch focuswindow "title:^$target_title$" | grep -qx "ok"
+    hyprctl dispatch togglefloating active | grep -qx "ok"
+    hyprctl dispatch resizeactive "exact 360 240" | grep -qx "ok"
+    hyprctl dispatch centerwindow | grep -qx "ok"
+
+    if ! wait_for_client "$target_title" 1 0; then
+        echo "PSD render probe: transformed target did not become floating." >&2
+        exit 1
+    fi
+
+    sleep 0.2
+
+    local geometry_before
+    geometry_before="$(client_geometry "$target_title")"
+
+    capture_output "$baseline"
+
+    apply_transform "$logical_offset" | grep -qx "ok"
+    sleep 0.2
+
+    local geometry_shifted
+    geometry_shifted="$(client_geometry "$target_title")"
+    if [[ "$geometry_shifted" != "$geometry_before" ]]; then
+        echo "PSD render probe: transformed target logical geometry changed under render-only offset." >&2
+        echo "before=$geometry_before shifted=$geometry_shifted" >&2
+        exit 1
+    fi
+
+    capture_output "$shifted"
+    assert_translation_vector_magnitude "$baseline" "$shifted" "$logical_offset" "$mode apply"
+
+    reset_transform | grep -qx "ok"
+    sleep 0.2
+    capture_output "$restored"
+    assert_translation_vector_magnitude "$baseline" "$restored" 0 "$mode reset"
+
+    kill -TERM "$target_pid" >/dev/null 2>&1 || true
+    wait "$target_pid" >/dev/null 2>&1 || true
+    target_pid=""
+
+    if ! wait_for_client_gone "$target_title"; then
+        echo "PSD render probe: transformed target remained after exit." >&2
+        exit 1
+    fi
+
+    echo "PSD render probe: monitor transform characterization PASS transform=$monitor_transform"
+}
+
 run_direct_scanout_guard_case() {
     if [[ "$RENDER_BACKEND" != "dedicated" ]]; then
         return
@@ -1837,6 +1965,12 @@ PY
 
     echo "PSD render probe: fullscreen/direct-scanout guard semantics PASS"
 }
+
+if [[ "$transform_only" == "1" ]]; then
+    run_monitor_transform_case
+    echo "PSD render probe: transformed-output evidence PASS backend=$RENDER_BACKEND transform=$monitor_transform"
+    exit 0
+fi
 
 run_case tiled
 run_case floating
