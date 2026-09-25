@@ -43,6 +43,7 @@ jobs:
             exit 1
           fi
           bash tests/integration/test-probe-live-session-mock.sh
+          bash tests/integration/test-probe-hardware-nvidia-mock.sh
 
       - name: Configure
         run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug

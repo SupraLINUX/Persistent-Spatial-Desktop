@@ -5,6 +5,25 @@ PLUGIN_PATH="${1:-build-hypr/src/compositor/hyprland-plugin/psd-hyprland-plugin.
 CLIENT_PATH="${2:-build/tests/psd-integration-client}"
 
 required_confirmation="I_UNDERSTAND_DISPLAY_MAY_FLICKER"
+
+test_mode="${PSD_HW_TEST_MODE:-0}"
+case "$test_mode" in
+    0)
+        sysfs_root="/sys"
+        ;;
+    1)
+        sysfs_root="${PSD_HW_TEST_SYSFS_ROOT:-}"
+        if [[ -z "$sysfs_root" ]]; then
+            echo "PSD NVIDIA hardware probe: PSD_HW_TEST_SYSFS_ROOT is required in test mode." >&2
+            exit 64
+        fi
+        ;;
+    *)
+        echo "PSD NVIDIA hardware probe: PSD_HW_TEST_MODE must be 0 or 1." >&2
+        exit 64
+        ;;
+esac
+
 if [[ "${PSD_HW_CONFIRM:-}" != "$required_confirmation" ]]; then
     cat >&2 <<EOF
 PSD NVIDIA hardware probe: explicit opt-in required.
@@ -67,13 +86,13 @@ if [[ -z "$gpu_summary" ]]; then
     exit 1
 fi
 
-if [[ ! -d /sys/module/nvidia_drm ]]; then
+if [[ ! -d $sysfs_root/module/nvidia_drm ]]; then
     echo "PSD NVIDIA hardware probe: nvidia_drm is not loaded." >&2
     exit 1
 fi
 
-if [[ -r /sys/module/nvidia_drm/parameters/modeset ]]; then
-    nvidia_modeset="$(cat /sys/module/nvidia_drm/parameters/modeset)"
+if [[ -r $sysfs_root/module/nvidia_drm/parameters/modeset ]]; then
+    nvidia_modeset="$(cat $sysfs_root/module/nvidia_drm/parameters/modeset)"
     case "$nvidia_modeset" in
         Y|y|1) ;;
         *)
@@ -130,7 +149,7 @@ fi
 drm_connector=""
 drm_driver=""
 shopt -s nullglob
-for candidate in /sys/class/drm/card*-"$target_monitor"; do
+for candidate in "$sysfs_root"/class/drm/card*-"$target_monitor"; do
     [[ -e "$candidate" ]] || continue
     driver_path="$(readlink -f "$candidate/device/driver" 2>/dev/null || true)"
     [[ -n "$driver_path" ]] || continue
@@ -526,4 +545,8 @@ if [[ "$fullscreen_vrr" == "true" ]]; then
 else
     echo "PSD NVIDIA hardware probe: active VRR NOT validated (PSD_HW_REQUIRE_VRR=0)"
 fi
-echo "PSD NVIDIA hardware probe: NVIDIA hardware characterization PASS"
+if [[ "$test_mode" == "1" ]]; then
+    echo "PSD NVIDIA hardware probe: MOCK control-flow characterization PASS"
+else
+    echo "PSD NVIDIA hardware probe: NVIDIA hardware characterization PASS"
+fi
