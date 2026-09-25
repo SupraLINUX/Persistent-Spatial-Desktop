@@ -824,3 +824,62 @@ After release, `gestureActive` must be false and gesture interception is
 disabled again. This covers kernel/uinput -> libinput -> Hyprland swipe hooks ->
 PSD plugin -> Hyprland event socket without adding any test-only injection API
 to the plugin itself.
+
+
+### Four-finger runtime activation checkpoint — after CI #247
+
+CI #247 closed the raw compositor-input path with a real virtual touchpad:
+three-finger swipes remained outside PSD, while a four-finger swipe produced
+one begin/end sequence with 11 updates, cumulative delta `(57.660, 0.000)`
+and ordered timestamps.
+
+Reviewing the real runtime exposed a separate integration gap: the shell
+consumed `psdgesture*` events but normal startup never requested
+`plugin:psd:gesture-events 1`. Only tests armed the plugin.
+
+The runtime now owns an explicit desired-vs-armed gesture subscription:
+
+- `ShellWindowManager::start()` requests four-finger PSD gestures;
+- `HyprlandIpcBridge` keeps the desired state even while plugin capabilities
+  are unavailable;
+- once the capability handshake reports
+  `fourFingerGestureEventsExperimental=true`, the bridge arms the plugin;
+- plugin unload/event-socket loss clears the observed armed state but retains
+  the desired state;
+- plugin reload therefore re-arms automatically after the new handshake;
+- shutdown requests disarm and waits for confirmation inside the existing
+  bounded compositor-sync drain.
+
+Three-finger gestures remain untouched because interception still occurs only
+inside the plugin's four-finger swipe hook.
+
+### Gesture-to-frame latency characterization
+
+Plugin 0.1.10 adds diagnostic-only monotonic timestamps for the real runtime
+gesture path. No public PSD API or compositor command syntax changes.
+
+For the first update of a four-finger gesture, diagnostics record:
+
+1. the Hyprland swipe-update hook receipt time;
+2. the first legacy `plugin:psd:offset` command received back from the real
+   PSD shell;
+3. the first following `preRender` for that monitor.
+
+This measures the current runtime path:
+
+`Hyprland input hook -> socket2 -> HyprlandIpcBridge -> ShellWindowManager ->
+SpatialMotionController -> SpatialCompositorSync -> command socket ->
+plugin:psd:offset -> preRender`.
+
+The dedicated presentation backend remains a parallel POC and is not promoted
+by this test; normal runtime still uses the legacy transform path.
+
+A dedicated QEMU probe starts the actual `psd-shell`, requires automatic
+gesture arming, injects a real four-finger uinput swipe, requires a non-zero
+shell-generated offset and causally ordered timing, then terminates the shell
+and requires both compositor reset and gesture disarm.
+
+The first pass uses only a loose 500 ms sanity ceiling. That ceiling is a
+characterization guard, not a product latency target. A production threshold
+must be based on repeated measurements from physical touchpads and real GPU
+presentation, including NVIDIA.

@@ -2,12 +2,14 @@
 
 #include "compositor/HyprlandProtocol.h"
 
+#include <QEventLoop>
 #include <QFileInfo>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonParseError>
 #include <QStandardPaths>
 
+#include <algorithm>
 #include <memory>
 #include <utility>
 
@@ -33,6 +35,7 @@ HyprlandIpcBridge::HyprlandIpcBridge(QObject *parent)
 
     connect(&m_eventSocket, &QLocalSocket::disconnected, this, [this] {
         cancelSpatialGestures();
+        setExperimentalSpatialGesturesArmed(false);
         setEventStreamConnected(false);
         setCapabilities({});
         if (available())
@@ -44,6 +47,7 @@ HyprlandIpcBridge::HyprlandIpcBridge(QObject *parent)
             return;
 
         cancelSpatialGestures();
+        setExperimentalSpatialGesturesArmed(false);
         setEventStreamConnected(false);
         setCapabilities({});
         setLastError(QStringLiteral("Hyprland event socket: %1").arg(m_eventSocket.errorString()));
@@ -92,6 +96,7 @@ void HyprlandIpcBridge::refreshAll()
 void HyprlandIpcBridge::refreshCapabilities()
 {
     if (!available()) {
+        setExperimentalSpatialGesturesArmed(false);
         setCapabilities({});
         return;
     }
@@ -100,6 +105,7 @@ void HyprlandIpcBridge::refreshCapabilities()
         QJsonParseError parseError;
         const QJsonDocument document = QJsonDocument::fromJson(json, &parseError);
         if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
+            setExperimentalSpatialGesturesArmed(false);
             setCapabilities({});
             return;
         }
@@ -119,7 +125,102 @@ void HyprlandIpcBridge::refreshCapabilities()
         capabilities.insert(QStringLiteral("lifecycleEventsExperimental"),
                             object.value(QStringLiteral("lifecycleEventsExperimental")).toBool());
         setCapabilities(std::move(capabilities));
+        synchronizeExperimentalSpatialGestures();
     }, false);
+}
+
+void HyprlandIpcBridge::setExperimentalSpatialGesturesEnabled(bool enabled)
+{
+    m_experimentalSpatialGesturesDesired = enabled;
+    synchronizeExperimentalSpatialGestures();
+}
+
+bool HyprlandIpcBridge::experimentalSpatialGesturesArmed() const noexcept
+{
+    return m_experimentalSpatialGesturesArmed;
+}
+
+bool HyprlandIpcBridge::waitForExperimentalSpatialGesturesArmed(
+    bool armed, int timeoutMs)
+{
+    if (m_experimentalSpatialGesturesArmed == armed)
+        return true;
+
+    QEventLoop loop;
+    QTimer timer;
+    timer.setSingleShot(true);
+
+    connect(this, &HyprlandIpcBridge::experimentalSpatialGesturesArmedChanged,
+            &loop, [this, armed, &loop] {
+        if (m_experimentalSpatialGesturesArmed == armed)
+            loop.quit();
+    });
+    connect(&timer, &QTimer::timeout, &loop, &QEventLoop::quit);
+
+    synchronizeExperimentalSpatialGestures();
+
+    const int boundedTimeoutMs = std::max(0, timeoutMs);
+    if (boundedTimeoutMs > 0) {
+        timer.start(boundedTimeoutMs);
+        loop.exec();
+    }
+
+    return m_experimentalSpatialGesturesArmed == armed;
+}
+
+void HyprlandIpcBridge::setExperimentalSpatialGesturesArmed(bool armed)
+{
+    if (m_experimentalSpatialGesturesArmed == armed)
+        return;
+
+    m_experimentalSpatialGesturesArmed = armed;
+    emit experimentalSpatialGesturesArmedChanged();
+}
+
+void HyprlandIpcBridge::synchronizeExperimentalSpatialGestures()
+{
+    const bool supported =
+        available()
+        && capabilities()
+               .value(QStringLiteral("fourFingerGestureEventsExperimental"))
+               .toBool();
+
+    if (!supported) {
+        setExperimentalSpatialGesturesArmed(false);
+        return;
+    }
+
+    if (m_experimentalSpatialGestureRequestInFlight
+        || m_experimentalSpatialGesturesArmed
+            == m_experimentalSpatialGesturesDesired) {
+        return;
+    }
+
+    const bool target = m_experimentalSpatialGesturesDesired;
+    m_experimentalSpatialGestureRequestInFlight = true;
+
+    requestText(
+        QByteArrayLiteral("dispatch plugin:psd:gesture-events ")
+            + (target ? QByteArrayLiteral("1") : QByteArrayLiteral("0")),
+        [this, target](const QByteArray &response) {
+            m_experimentalSpatialGestureRequestInFlight = false;
+
+            const QString result = QString::fromUtf8(response).trimmed();
+            if (result == QStringLiteral("ok")) {
+                setExperimentalSpatialGesturesArmed(target);
+            } else {
+                setLastError(
+                    QStringLiteral("PSD spatial gesture subscription failed: %1")
+                        .arg(result));
+            }
+
+            if (m_experimentalSpatialGesturesArmed
+                != m_experimentalSpatialGesturesDesired) {
+                QTimer::singleShot(
+                    0, this,
+                    &HyprlandIpcBridge::synchronizeExperimentalSpatialGestures);
+            }
+        });
 }
 
 quint64 HyprlandIpcBridge::setSpatialTransformOffset(
@@ -264,6 +365,7 @@ void HyprlandIpcBridge::handleEventLine(const QByteArray &line)
 
     if (event.name == QStringLiteral("psdpluginunloading")) {
         cancelSpatialGestures();
+        setExperimentalSpatialGesturesArmed(false);
         setCapabilities({});
         return;
     }

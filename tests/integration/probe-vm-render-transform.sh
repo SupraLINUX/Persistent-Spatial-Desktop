@@ -151,7 +151,7 @@ import sys
 
 data = json.loads(sys.argv[1])
 assert data["protocolVersion"] == 3, data
-assert data["pluginVersion"] == "0.1.9", data
+assert data["pluginVersion"] == "0.1.10", data
 assert data["spatialRenderOffsetExperimental"] is True, data
 assert data["monitorTargeting"] is True, data
 backend = sys.argv[2]

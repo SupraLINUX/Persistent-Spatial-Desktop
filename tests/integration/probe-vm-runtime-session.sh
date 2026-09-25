@@ -831,6 +831,8 @@ fi
 
 echo "PSD VM runtime probe: four-finger touchpad integration PASS"
 
+bash "$(dirname "$0")/probe-vm-gesture-latency.sh"     "$SHELL_PATH"     "$PLUGIN_PATH"     "$touchpad_helper_path"
+
 bash "$(dirname "$0")/probe-vm-workspace-animation.sh" "$test_client_path" "$PLUGIN_PATH"
 
 PSD_PROBE_TEST_CLIENT="$test_client_path" \

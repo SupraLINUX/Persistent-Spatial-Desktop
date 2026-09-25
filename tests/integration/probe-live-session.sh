@@ -400,9 +400,31 @@ PY
     echo "PSD live probe: monitor hot-add + independent CENTER surface on $hotplug_monitor PASS"
 fi
 
-hyprctl dispatch plugin:psd:gesture-events 1 | grep -qx "ok"
-hyprctl dispatch plugin:psd:gesture-events 0 | grep -qx "ok"
-echo "PSD live probe: four-finger gesture arm/disarm PASS"
+gesture_auto_armed=0
+for _ in $(seq 1 60); do
+    state_json="$(plugin_state)"
+    if python3 - "$state_json" <<'PY' >/dev/null 2>&1
+import json
+import sys
+
+state = json.loads(sys.argv[1])
+raise SystemExit(0 if state.get("gestureEventsEnabled") is True else 1)
+PY
+    then
+        gesture_auto_armed=1
+        break
+    fi
+    sleep 0.05
+done
+
+if [[ "$gesture_auto_armed" != "1" ]]; then
+    echo "PSD live probe: shell did not automatically arm four-finger gestures." >&2
+    plugin_state >&2 || true
+    cat "$log_file" >&2 || true
+    exit 1
+fi
+
+echo "PSD live probe: runtime automatic four-finger gesture arm PASS"
 
 if [[ "${PSD_PROBE_EXERCISE_OFFSET:-0}" == "1" ]]; then
     hyprctl dispatch plugin:psd:offset "$primary_monitor 24 0" | grep -qx "ok"
@@ -1093,6 +1115,8 @@ if capabilities.get("lifecycleEventsExperimental") is not True:
     raise SystemExit(1)
 if state.get("trackedTransforms") != []:
     raise SystemExit(1)
+if state.get("gestureEventsEnabled") is not True:
+    raise SystemExit(1)
 PY
             then
                 reload_ready=1
@@ -1196,7 +1220,12 @@ import json
 import sys
 
 state = json.loads(sys.argv[1])
-raise SystemExit(0 if state["trackedTransforms"] == [] else 1)
+clean = (
+    state["trackedTransforms"] == []
+    and state.get("gestureEventsEnabled") is False
+    and state.get("gestureActive") is False
+)
+raise SystemExit(0 if clean else 1)
 PY
         then
             shutdown_clean=1
@@ -1212,7 +1241,7 @@ PY
         exit 1
     fi
 
-    echo "PSD live probe: SIGTERM drain + final compositor reset PASS"
+    echo "PSD live probe: SIGTERM drain + final compositor reset + gesture disarm PASS"
 
     restore_runtime_context
 fi

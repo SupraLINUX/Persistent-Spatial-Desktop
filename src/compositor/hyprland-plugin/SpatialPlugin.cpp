@@ -14,6 +14,7 @@
 #include <any>
 #include <cstdint>
 #include <cmath>
+#include <chrono>
 #include <format>
 #include <numeric>
 #include <sstream>
@@ -38,6 +39,17 @@ struct MonitorTransformState
     Vector2D offset;
     uint64_t workspaceGeneration = 0;
     std::vector<PresentationWindowTransform> presentationWindows;
+};
+
+struct GestureLatencyDiagnostic
+{
+    bool valid = false;
+    std::string monitorName;
+    uint64_t firstUpdateNs = 0;
+    uint64_t firstLegacyCommandNs = 0;
+    uint64_t firstPreRenderNs = 0;
+    uint64_t updateCount = 0;
+    Vector2D firstLegacyOffset;
 };
 
 struct NativeWorkspaceAnimationConflict
@@ -85,6 +97,15 @@ uint64_t g_nextWorkspaceGeneration = 1;
 uint64_t g_workspaceSwitchResetCount = 0;
 uint64_t g_nativeWorkspaceAnimationConflictCount = 0;
 NativeWorkspaceAnimationConflict g_lastNativeWorkspaceAnimationConflict;
+GestureLatencyDiagnostic g_gestureLatencyDiagnostic;
+
+uint64_t monotonicNowNs()
+{
+    return static_cast<uint64_t>(
+        std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::steady_clock::now().time_since_epoch())
+            .count());
+}
 
 bool workspaceHasExplicitFullscreen(const PHLWORKSPACE &workspace)
 {
@@ -226,7 +247,15 @@ void onPreRender(void *, SCallbackInfo &, std::any parameter)
     if (!monitor || !*monitor)
         return;
 
-    ++g_monitorRenderCounts[(*monitor)->m_name];
+    const std::string &monitorName = (*monitor)->m_name;
+    ++g_monitorRenderCounts[monitorName];
+
+    if (g_gestureLatencyDiagnostic.valid
+        && g_gestureLatencyDiagnostic.monitorName == monitorName
+        && g_gestureLatencyDiagnostic.firstLegacyCommandNs != 0
+        && g_gestureLatencyDiagnostic.firstPreRenderNs == 0) {
+        g_gestureLatencyDiagnostic.firstPreRenderNs = monotonicNowNs();
+    }
 }
 
 void damageDedicatedMonitor(const std::string &monitorName)
@@ -565,6 +594,15 @@ SDispatchResult setOffset(std::string arguments)
         };
     }
 
+    if (g_spatialGestureActive
+        && g_gestureLatencyDiagnostic.valid
+        && g_gestureLatencyDiagnostic.monitorName == monitorName
+        && g_gestureLatencyDiagnostic.firstUpdateNs != 0
+        && g_gestureLatencyDiagnostic.firstLegacyCommandNs == 0) {
+        g_gestureLatencyDiagnostic.firstLegacyCommandNs = monotonicNowNs();
+        g_gestureLatencyDiagnostic.firstLegacyOffset = Vector2D{x, y};
+    }
+
     MonitorTransformState &state = trackWorkspaceForMonitor(monitorName, workspace);
     state.offset = Vector2D{x, y};
     applyOffset(workspace, state.offset);
@@ -658,6 +696,10 @@ void onSwipeBegin(void *, SCallbackInfo &info, std::any parameter)
 
     g_spatialGestureActive = true;
     g_spatialGestureMonitor = monitor->m_name;
+    g_gestureLatencyDiagnostic = {
+        .valid = true,
+        .monitorName = g_spatialGestureMonitor,
+    };
     info.cancelled = true;
 
     postGestureEvent(
@@ -676,6 +718,13 @@ void onSwipeUpdate(void *, SCallbackInfo &info, std::any parameter)
     if (event.fingers != 4) {
         finishSpatialGesture(true, event.timeMs);
         return;
+    }
+
+    if (g_gestureLatencyDiagnostic.valid
+        && g_gestureLatencyDiagnostic.monitorName == g_spatialGestureMonitor) {
+        ++g_gestureLatencyDiagnostic.updateCount;
+        if (g_gestureLatencyDiagnostic.firstUpdateNs == 0)
+            g_gestureLatencyDiagnostic.firstUpdateNs = monotonicNowNs();
     }
 
     postGestureEvent(
@@ -702,12 +751,12 @@ std::string capabilitiesResponse(eHyprCtlOutputFormat format, std::string)
 {
     if (format == FORMAT_JSON) {
         return std::format(
-            R"json({{"protocolVersion":3,"pluginVersion":"0.1.9","spatialRenderOffsetExperimental":true,"monitorTargeting":true,"fourFingerGestureEventsExperimental":true,"gestureEventsDefaultEnabled":false,"diagnosticStateQueryExperimental":true,"lifecycleEventsExperimental":true,"rigidFloatingNormalizationExperimental":true,"pinnedPresentationOffsetExperimental":true,"nativeWorkspaceAnimationDiagnosticsExperimental":true,"dedicatedPresentationOffsetExperimental":{}}})json",
+            R"json({{"protocolVersion":3,"pluginVersion":"0.1.10","spatialRenderOffsetExperimental":true,"monitorTargeting":true,"fourFingerGestureEventsExperimental":true,"gestureEventsDefaultEnabled":false,"diagnosticStateQueryExperimental":true,"lifecycleEventsExperimental":true,"rigidFloatingNormalizationExperimental":true,"pinnedPresentationOffsetExperimental":true,"nativeWorkspaceAnimationDiagnosticsExperimental":true,"dedicatedPresentationOffsetExperimental":{}}})json",
             g_dedicatedPresentationAvailable ? "true" : "false");
     }
 
     return std::format(
-        "protocolVersion=3 pluginVersion=0.1.9 spatialRenderOffsetExperimental=true monitorTargeting=true fourFingerGestureEventsExperimental=true gestureEventsDefaultEnabled=false diagnosticStateQueryExperimental=true lifecycleEventsExperimental=true rigidFloatingNormalizationExperimental=true pinnedPresentationOffsetExperimental=true nativeWorkspaceAnimationDiagnosticsExperimental=true dedicatedPresentationOffsetExperimental={}",
+        "protocolVersion=3 pluginVersion=0.1.10 spatialRenderOffsetExperimental=true monitorTargeting=true fourFingerGestureEventsExperimental=true gestureEventsDefaultEnabled=false diagnosticStateQueryExperimental=true lifecycleEventsExperimental=true rigidFloatingNormalizationExperimental=true pinnedPresentationOffsetExperimental=true nativeWorkspaceAnimationDiagnosticsExperimental=true dedicatedPresentationOffsetExperimental={}",
         g_dedicatedPresentationAvailable ? "true" : "false");
 }
 
@@ -881,6 +930,37 @@ std::string stateResponse(eHyprCtlOutputFormat format, std::string)
             workspace->m_renderOffset->isBeingAnimated() ? "true" : "false");
     }
 
+    std::string gestureLatency = "null";
+    if (g_gestureLatencyDiagnostic.valid) {
+        const auto &latency = g_gestureLatencyDiagnostic;
+
+        const uint64_t updateToCommandUs =
+            latency.firstUpdateNs != 0
+                && latency.firstLegacyCommandNs >= latency.firstUpdateNs
+            ? (latency.firstLegacyCommandNs - latency.firstUpdateNs) / 1000
+            : 0;
+        const uint64_t commandToPreRenderUs =
+            latency.firstLegacyCommandNs != 0
+                && latency.firstPreRenderNs >= latency.firstLegacyCommandNs
+            ? (latency.firstPreRenderNs - latency.firstLegacyCommandNs) / 1000
+            : 0;
+        const uint64_t updateToPreRenderUs =
+            latency.firstUpdateNs != 0
+                && latency.firstPreRenderNs >= latency.firstUpdateNs
+            ? (latency.firstPreRenderNs - latency.firstUpdateNs) / 1000
+            : 0;
+
+        gestureLatency = std::format(
+            R"json({{"monitor":"{}","updateCount":{},"firstLegacyOffsetX":{:.6f},"firstLegacyOffsetY":{:.6f},"updateToCommandUs":{},"commandToPreRenderUs":{},"updateToPreRenderUs":{}}})json",
+            jsonEscape(latency.monitorName),
+            latency.updateCount,
+            latency.firstLegacyOffset.x,
+            latency.firstLegacyOffset.y,
+            updateToCommandUs,
+            commandToPreRenderUs,
+            updateToPreRenderUs);
+    }
+
     std::string lastNativeConflict = "null";
     if (g_lastNativeWorkspaceAnimationConflict.valid) {
         const auto &conflict = g_lastNativeWorkspaceAnimationConflict;
@@ -897,7 +977,7 @@ std::string stateResponse(eHyprCtlOutputFormat format, std::string)
     }
 
     return std::format(
-        R"json({{"trackedTransforms":[{}],"touchedWorkspaceCount":{},"trackedPresentationWindowCount":{},"presentationOffsets":[{}],"workspaceSwitchResetCount":{},"dedicatedPresentationOffsets":[{}],"dedicatedDamageRequests":[{}],"monitorRenderCounts":[{}],"fullscreenDedicatedResetCounts":[{}],"activeWorkspaceAnimations":[{}],"nativeWorkspaceAnimationConflictCount":{},"lastNativeWorkspaceAnimationConflict":{},"gestureEventsEnabled":{},"gestureActive":{}}})json",
+        R"json({{"trackedTransforms":[{}],"touchedWorkspaceCount":{},"trackedPresentationWindowCount":{},"presentationOffsets":[{}],"workspaceSwitchResetCount":{},"dedicatedPresentationOffsets":[{}],"dedicatedDamageRequests":[{}],"monitorRenderCounts":[{}],"fullscreenDedicatedResetCounts":[{}],"activeWorkspaceAnimations":[{}],"gestureLatency":{},"nativeWorkspaceAnimationConflictCount":{},"lastNativeWorkspaceAnimationConflict":{},"gestureEventsEnabled":{},"gestureActive":{}}})json",
         transforms,
         g_touchedWorkspaces.size(),
         std::accumulate(
@@ -914,6 +994,7 @@ std::string stateResponse(eHyprCtlOutputFormat format, std::string)
         monitorRenderCounts,
         fullscreenDedicatedResetCounts,
         activeWorkspaceAnimations,
+        gestureLatency,
         g_nativeWorkspaceAnimationConflictCount,
         lastNativeConflict,
         g_gestureEventsEnabled ? "true" : "false",
@@ -956,6 +1037,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle)
     g_dedicatedDamageRequestCounts.clear();
     g_monitorRenderCounts.clear();
     g_fullscreenDedicatedResetCounts.clear();
+    g_gestureLatencyDiagnostic = {};
     g_dedicatedPresentationAvailable = installDedicatedPresentationHook();
 
     bool success = true;
@@ -1015,7 +1097,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle)
         "psd-hyprland-plugin",
         "Persistent Spatial Desktop compositor integration experiment",
         "SupraLINUX",
-        "0.1.9",
+        "0.1.10",
     };
 }
 

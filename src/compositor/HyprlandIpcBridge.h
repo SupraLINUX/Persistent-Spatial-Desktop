@@ -29,7 +29,12 @@ public:
     Q_INVOKABLE void refreshAll() override;
     Q_INVOKABLE void refreshCapabilities();
 
+    void setExperimentalSpatialGesturesEnabled(bool enabled);
+    [[nodiscard]] bool experimentalSpatialGesturesArmed() const noexcept;
+    bool waitForExperimentalSpatialGesturesArmed(bool armed, int timeoutMs);
+
 signals:
+    void experimentalSpatialGesturesArmedChanged();
     void instanceSignatureChanged();
     void experimentalSpatialGestureBegin(const QString &monitorName);
     void experimentalSpatialGestureUpdate(const QString &monitorName, double deltaX, double deltaY);
@@ -58,6 +63,8 @@ private:
     void requestJson(const QByteArray &request, ResponseCallback callback, bool reportParseErrors = true);
     void requestText(const QByteArray &request, ResponseCallback callback);
     void cancelSpatialGestures();
+    void synchronizeExperimentalSpatialGestures();
+    void setExperimentalSpatialGesturesArmed(bool armed);
 
     struct GestureSample {
         quint32 timeMs = 0;
@@ -73,4 +80,7 @@ private:
     QTimer m_reconnectTimer;
     quint8 m_pendingRefresh = RefreshNone;
     QHash<QString, GestureSample> m_gestureSamples;
+    bool m_experimentalSpatialGesturesDesired = false;
+    bool m_experimentalSpatialGesturesArmed = false;
+    bool m_experimentalSpatialGestureRequestInFlight = false;
 };

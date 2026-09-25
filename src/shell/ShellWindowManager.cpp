@@ -72,6 +72,8 @@ ShellWindowManager::ShellWindowManager(
 
 void ShellWindowManager::start()
 {
+    m_compositorBridge->setExperimentalSpatialGesturesEnabled(true);
+
     connect(qGuiApp, &QGuiApplication::screenAdded,
             this, &ShellWindowManager::createForScreen);
     connect(qGuiApp, &QGuiApplication::screenRemoved,
@@ -89,6 +91,8 @@ int ShellWindowManager::windowCount() const noexcept
 bool ShellWindowManager::shutdownCompositorSync(int timeoutMs)
 {
     const int boundedTimeoutMs = std::max(0, timeoutMs);
+
+    m_compositorBridge->setExperimentalSpatialGesturesEnabled(false);
 
     for (Instance *instance : m_instances) {
         if (instance && instance->compositorSync)
@@ -113,6 +117,14 @@ bool ShellWindowManager::shutdownCompositorSync(int timeoutMs)
             << "PSD failed to confirm final compositor reset for"
             << instance->compositorSync->monitorName()
             << instance->compositorSync->lastError();
+    }
+
+    const int gestureRemainingMs =
+        std::max(0, boundedTimeoutMs - static_cast<int>(elapsed.elapsed()));
+    if (!m_compositorBridge->waitForExperimentalSpatialGesturesArmed(
+            false, gestureRemainingMs)) {
+        success = false;
+        qWarning() << "PSD exited without confirming four-finger gesture disarm";
     }
 
     return success;
