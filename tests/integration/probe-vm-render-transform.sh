@@ -967,6 +967,8 @@ run_popup_case() {
     local baseline="$work_dir/$mode-baseline.png"
     local shifted="$work_dir/$mode-shifted.png"
     local restored="$work_dir/$mode-restored.png"
+    local logical_offset=96
+    local screenshot_offset=""
 
     reset_transform | grep -qx "ok"
 
@@ -1074,9 +1076,6 @@ PY
     local geometry_before
     geometry_before="$(client_geometry "$target_title")"
 
-    local logical_offset=96
-    local screenshot_offset=""
-
     apply_transform "$logical_offset" | grep -qx "ok"
     sleep 0.2
 
@@ -1149,6 +1148,8 @@ run_subsurface_case() {
     local baseline="$work_dir/$mode-baseline.png"
     local shifted="$work_dir/$mode-shifted.png"
     local restored="$work_dir/$mode-restored.png"
+    local logical_offset=96
+    local screenshot_offset=""
 
     reset_transform | grep -qx "ok"
 
@@ -1255,9 +1256,6 @@ PY
 
     local geometry_before
     geometry_before="$(client_geometry "$target_title")"
-
-    local logical_offset=96
-    local screenshot_offset=""
 
     apply_transform "$logical_offset" | grep -qx "ok"
     sleep 0.2

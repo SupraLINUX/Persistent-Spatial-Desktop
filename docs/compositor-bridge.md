@@ -537,3 +537,16 @@ from running. This is useful because the legacy path primarily uses
 POC both use `CWindow::m_floatingOffset`. A split result will therefore
 localize any scale-unit mismatch rather than attributing it generically to
 screencopy or HiDPI.
+
+
+#### Fractional calibration harness correction — CI #238
+
+CI #238 did not reach the fractional-scale control pass. The dedicated scale-1
+suite stopped in the xdg_popup case because screenshot calibration had been
+inserted inside the popup visibility loop before that function declared its
+`logical_offset`. With `set -u`, Bash terminated on the unbound variable.
+
+The xdg_popup and wl_subsurface cases now declare their calibration inputs
+before their first baseline capture. The tiled/floating/pinned, decoration and
+damage cases were already ordered correctly. No compositor/backend behavior
+changed in this correction.
