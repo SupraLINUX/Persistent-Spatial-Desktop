@@ -912,3 +912,38 @@ The non-QEMU Ubuntu job also exposed an expected fixture mismatch: the
 manually armed gesture events. The mock now auto-arms on start, auto-disarms on
 termination, and reports gesture state through its mocked
 `psd-plugin-state`.
+
+
+#### Runtime gesture teardown ordering — after CI #249
+
+CI #249 again completed the real four-finger runtime path before teardown.
+The measured QEMU sample improved to:
+
+- swipe hook -> shell compositor command: **14.060 ms**;
+- command -> monitor preRender: **0.315 ms**;
+- hook -> preRender: **14.376 ms**.
+
+The shell still exited with SIGSEGV after SIGTERM. Reviewing the shutdown path
+showed that `ShellWindowManager::shutdownCompositorSync()` first called the
+normal asynchronous gesture setter after the main Qt event loop had already
+returned. It then entered the existing compositor reset drain, whose nested
+event loop could process that newly-created gesture socket during teardown.
+
+Shutdown no longer starts asynchronous gesture IPC. It now:
+
+1. marks the bridge's desired gesture state false and cancels local gesture
+   samples without opening a socket;
+2. drains/resets all compositor transforms;
+3. performs one bounded synchronous gesture-disarm request;
+4. returns only after both transform reset and gesture disarm are confirmed.
+
+Normal runtime arm/re-arm remains asynchronous and event-driven.
+
+The QEMU latency probe now captures and prints the complete `psd-shell` log
+and plugin state if the shell exits abnormally, so any remaining teardown crash
+will have direct diagnostic evidence instead of only exit code 139.
+
+The Ubuntu mock failure in CI #249 was independent: its mocked gesture
+dispatcher parsed the value from argument 4 even though
+`dispatch plugin:psd:gesture-events 1` places it in argument 3. The fixture
+now matches the actual command shape.

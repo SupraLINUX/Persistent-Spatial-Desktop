@@ -30,6 +30,7 @@ public:
     Q_INVOKABLE void refreshCapabilities();
 
     void setExperimentalSpatialGesturesEnabled(bool enabled);
+    void prepareExperimentalSpatialGestureShutdown();
     [[nodiscard]] bool experimentalSpatialGesturesArmed() const noexcept;
     bool waitForExperimentalSpatialGesturesArmed(bool armed, int timeoutMs);
 

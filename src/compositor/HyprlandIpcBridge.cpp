@@ -135,6 +135,16 @@ void HyprlandIpcBridge::setExperimentalSpatialGesturesEnabled(bool enabled)
     synchronizeExperimentalSpatialGestures();
 }
 
+void HyprlandIpcBridge::prepareExperimentalSpatialGestureShutdown()
+{
+    // main() calls the shell shutdown drain after QGuiApplication::exec()
+    // returns. Do not create a new asynchronous QLocalSocket request in that
+    // phase: only freeze the desired state here. The bounded synchronous
+    // disarm happens after compositor transforms have drained.
+    m_experimentalSpatialGesturesDesired = false;
+    cancelSpatialGestures();
+}
+
 bool HyprlandIpcBridge::experimentalSpatialGesturesArmed() const noexcept
 {
     return m_experimentalSpatialGesturesArmed;

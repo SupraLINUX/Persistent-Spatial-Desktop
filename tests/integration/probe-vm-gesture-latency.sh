@@ -262,8 +262,20 @@ if [[ "$shell_exited" != "1" ]]; then
     exit 1
 fi
 
+set +e
 wait "$shell_pid"
+shell_status=$?
+set -e
 shell_pid=""
+
+if [[ "$shell_status" -ne 0 ]]; then
+    echo "PSD gesture latency probe: shell exited abnormally status=$shell_status" >&2
+    echo "===== psd-shell log =====" >&2
+    cat "$log_file" >&2 || true
+    echo "===== plugin state after shell failure =====" >&2
+    hyprctl -j psd-plugin-state >&2 || true
+    exit "$shell_status"
+fi
 
 disarmed=0
 for _ in $(seq 1 60); do

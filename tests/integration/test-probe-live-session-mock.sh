@@ -82,7 +82,7 @@ PY
     "dispatch plugin:psd:gesture-events "*)
         [[ -e "$plugin_state" ]] || exit 1
         set -- $*
-        enabled="${4}"
+        enabled="${3}"
         if [[ "$enabled" == "1" ]]; then
             touch "$gesture_state"
         elif [[ "$enabled" == "0" ]]; then

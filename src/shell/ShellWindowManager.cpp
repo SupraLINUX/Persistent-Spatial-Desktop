@@ -92,7 +92,7 @@ bool ShellWindowManager::shutdownCompositorSync(int timeoutMs)
 {
     const int boundedTimeoutMs = std::max(0, timeoutMs);
 
-    m_compositorBridge->setExperimentalSpatialGesturesEnabled(false);
+    m_compositorBridge->prepareExperimentalSpatialGestureShutdown();
 
     for (Instance *instance : m_instances) {
         if (instance && instance->compositorSync)
