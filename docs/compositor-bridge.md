@@ -734,3 +734,47 @@ using the full monitor rule path, then the dedicated transform-only probe
 verifies logical geometry immutability, stable target area, 96-unit visual
 translation magnitude and exact reset. Scale remains 1.0 so transform behavior
 is isolated from the already-closed fractional-scale characterization.
+
+
+### Monitor-transform matrix checkpoint — CI #245
+
+CI #245 passed every non-normal Wayland output transform from 1 through 7.
+For each rotated/flipped state, the dedicated backend produced the same
+observed result:
+
+- requested logical X displacement: 96;
+- screenshot vector: `(96, 0)`;
+- translation magnitude: exactly 96 pixels;
+- target pixel-count ratio: exactly 1.0000;
+- reset vector: `(0, 0)`;
+- logical window geometry remained unchanged.
+
+The complete QEMU probe also remained green. Rotated/flipped-output
+presentation is therefore closed for the current dedicated POC at scale 1.0.
+
+### VRR compatibility characterization
+
+Hyprland 0.53.3 controls adaptive sync through `misc:vrr` or the per-monitor
+`vrr` rule. When VRR is requested, Hyprland tests the pending output state;
+an unsupported output falls back to adaptive sync disabled. Rendering remains
+damage/VFR-driven and only schedules another frame when required.
+
+The QEMU probe now requests per-monitor `vrr=1` and records the **actual**
+live adaptive-sync state from `hyprctl monitors`. It does not assume the
+virtio DRM output supports VRR.
+
+With that state held constant, the probe applies and resets one dedicated PSD
+offset and verifies:
+
+- the VRR state does not change because of PSD presentation offset activity;
+- each apply/reset produces a damage request and compositor frame;
+- damage requests become quiet after the operation;
+- render counts become quiet after the operation, so PSD does not introduce a
+  continuous-frame loop;
+- removing the temporary monitor VRR override restores the original output
+  state.
+
+A green QEMU result with `active=false` validates compatibility with the
+unsupported-VRR fallback path, not real adaptive-sync presentation. Active VRR
+still requires a physical VRR-capable DRM output and remains part of the later
+hardware/NVIDIA validation.

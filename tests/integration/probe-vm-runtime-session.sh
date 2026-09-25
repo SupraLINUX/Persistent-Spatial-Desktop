@@ -47,6 +47,7 @@ original_monitor_scale=""
 original_monitor_transform=""
 fractional_plugin_preloaded=0
 transform_plugin_preloaded=0
+vrr_plugin_preloaded=0
 
 if [[ "${PSD_PROBE_USE_WAYLAND_BACKEND:-0}" == "1" ]]; then
     if [[ -z "${XDG_RUNTIME_DIR:-}" || -z "${WAYLAND_DISPLAY:-}" ]]; then
@@ -77,6 +78,11 @@ cleanup() {
 
     if [[ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" && -n "${monitor_name:-}" && -n "${original_monitor_scale:-}" && -n "${original_monitor_transform:-}" ]]; then
         hyprctl keyword monitor "$monitor_name,preferred,auto,$original_monitor_scale,transform,$original_monitor_transform" >/dev/null 2>&1 || true
+    fi
+
+    if [[ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" && "$vrr_plugin_preloaded" == "1" ]]; then
+        hyprctl plugin unload "$PLUGIN_PATH" >/dev/null 2>&1 || true
+        vrr_plugin_preloaded=0
     fi
 
     if [[ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" && "$transform_plugin_preloaded" == "1" ]]; then
@@ -299,6 +305,99 @@ set_monitor_transform() {
     wait_for_monitor_transform "$transform"
 }
 
+monitor_vrr_state() {
+    local monitors_json
+    monitors_json="$(hyprctl -j monitors)"
+    python3 - "$monitors_json" "$monitor_name" <<'PY'
+import json
+import sys
+
+monitors = json.loads(sys.argv[1])
+name = sys.argv[2]
+monitor = next((item for item in monitors if item.get("name") == name), None)
+if monitor is None:
+    raise SystemExit(1)
+print("true" if bool(monitor.get("vrr", False)) else "false")
+PY
+}
+
+plugin_state_counter() {
+    local field="$1"
+    local state
+    state="$(hyprctl -j psd-plugin-state)"
+    python3 - "$state" "$field" "$monitor_name" <<'PY'
+import json
+import sys
+
+state = json.loads(sys.argv[1])
+field = sys.argv[2]
+monitor = sys.argv[3]
+entry = next(
+    (item for item in state.get(field, []) if item.get("monitor") == monitor),
+    None,
+)
+print(int(entry.get("count", 0)) if entry else 0)
+PY
+}
+
+wait_plugin_counter_after() {
+    local field="$1"
+    local before="$2"
+    local label="$3"
+
+    for _ in $(seq 1 80); do
+        local now
+        now="$(plugin_state_counter "$field")"
+        if (( now > before )); then
+            echo "PSD VM runtime probe: $label PASS count=$before->$now"
+            return 0
+        fi
+        sleep 0.05
+    done
+
+    echo "PSD VM runtime probe: $label did not advance field=$field before=$before" >&2
+    hyprctl -j psd-plugin-state >&2 || true
+    return 1
+}
+
+wait_plugin_counter_quiet() {
+    local field="$1"
+    local label="$2"
+
+    for _ in $(seq 1 30); do
+        local before
+        local after
+        before="$(plugin_state_counter "$field")"
+        sleep 0.10
+        after="$(plugin_state_counter "$field")"
+        if [[ "$after" == "$before" ]]; then
+            echo "PSD VM runtime probe: $label PASS count=$after"
+            return 0
+        fi
+    done
+
+    echo "PSD VM runtime probe: $label never became quiet field=$field" >&2
+    hyprctl -j psd-plugin-state >&2 || true
+    return 1
+}
+
+apply_monitor_vrr_rule() {
+    local requested="$1"
+    local scale
+    local transform
+    scale="$(monitor_scale)"
+    transform="$(monitor_transform)"
+    hyprctl keyword monitor "$monitor_name,preferred,auto,$scale,transform,$transform,vrr,$requested" | grep -qx "ok"
+}
+
+restore_monitor_rule_without_vrr_override() {
+    local scale
+    local transform
+    scale="$(monitor_scale)"
+    transform="$(monitor_transform)"
+    hyprctl keyword monitor "$monitor_name,preferred,auto,$scale,transform,$transform" | grep -qx "ok"
+}
+
 set_fractional_monitor_scale() {
     local requested="$1"
 
@@ -404,6 +503,76 @@ if [[ "$transform_plugin_preloaded" == "1" ]]; then
 fi
 
 echo "PSD VM runtime probe: monitor-transform matrix characterization PASS transforms=1..7"
+
+echo "PSD VM runtime probe: VRR compatibility characterization begin"
+
+plugin_loaded="$(hyprctl -j plugin list | python3 -c 'import json,sys; d=json.load(sys.stdin); print(any(x.get("name")=="psd-hyprland-plugin" for x in d))')"
+if [[ "$plugin_loaded" != "True" ]]; then
+    hyprctl plugin load "$PLUGIN_PATH" | grep -qx "ok"
+    vrr_plugin_preloaded=1
+fi
+
+hyprctl dispatch plugin:psd:presentation-reset "$monitor_name" | grep -qx "ok"
+
+original_vrr_state="$(monitor_vrr_state)"
+apply_monitor_vrr_rule 1
+
+# The QEMU virtio DRM output may reject adaptive sync. Give Hyprland time to
+# test/commit the requested state, then record the actual output state rather
+# than assuming capability.
+sleep 0.25
+requested_vrr_state="$(monitor_vrr_state)"
+echo "PSD VM runtime probe: VRR request=1 active=$requested_vrr_state original=$original_vrr_state"
+
+wait_plugin_counter_quiet "monitorRenderCounts" "VRR baseline render quiet"
+
+vrr_damage_before="$(plugin_state_counter "dedicatedDamageRequests")"
+vrr_render_before="$(plugin_state_counter "monitorRenderCounts")"
+
+hyprctl dispatch plugin:psd:presentation-offset "$monitor_name 96 0" | grep -qx "ok"
+
+wait_plugin_counter_after     "dedicatedDamageRequests" "$vrr_damage_before" "VRR apply damage request"
+wait_plugin_counter_after     "monitorRenderCounts" "$vrr_render_before" "VRR apply compositor frame"
+wait_plugin_counter_quiet "dedicatedDamageRequests" "VRR apply damage quiet"
+wait_plugin_counter_quiet "monitorRenderCounts" "VRR apply render quiet"
+
+vrr_during_offset="$(monitor_vrr_state)"
+if [[ "$vrr_during_offset" != "$requested_vrr_state" ]]; then
+    echo "PSD VM runtime probe: PSD offset changed VRR state unexpectedly: before=$requested_vrr_state during=$vrr_during_offset" >&2
+    exit 1
+fi
+
+vrr_damage_before_reset="$(plugin_state_counter "dedicatedDamageRequests")"
+vrr_render_before_reset="$(plugin_state_counter "monitorRenderCounts")"
+
+hyprctl dispatch plugin:psd:presentation-reset "$monitor_name" | grep -qx "ok"
+
+wait_plugin_counter_after     "dedicatedDamageRequests" "$vrr_damage_before_reset" "VRR reset damage request"
+wait_plugin_counter_after     "monitorRenderCounts" "$vrr_render_before_reset" "VRR reset compositor frame"
+wait_plugin_counter_quiet "dedicatedDamageRequests" "VRR reset damage quiet"
+wait_plugin_counter_quiet "monitorRenderCounts" "VRR reset render quiet"
+
+vrr_after_reset="$(monitor_vrr_state)"
+if [[ "$vrr_after_reset" != "$requested_vrr_state" ]]; then
+    echo "PSD VM runtime probe: PSD reset changed VRR state unexpectedly: before=$requested_vrr_state after=$vrr_after_reset" >&2
+    exit 1
+fi
+
+restore_monitor_rule_without_vrr_override
+sleep 0.25
+restored_vrr_state="$(monitor_vrr_state)"
+if [[ "$restored_vrr_state" != "$original_vrr_state" ]]; then
+    echo "PSD VM runtime probe: VRR state did not restore: original=$original_vrr_state restored=$restored_vrr_state" >&2
+    exit 1
+fi
+
+if [[ "$vrr_plugin_preloaded" == "1" ]]; then
+    hyprctl plugin unload "$PLUGIN_PATH" | grep -qx "ok"
+    vrr_plugin_preloaded=0
+    echo "PSD VM runtime probe: VRR plugin unloaded"
+fi
+
+echo "PSD VM runtime probe: VRR compatibility characterization PASS active=$requested_vrr_state"
 
 bash "$(dirname "$0")/probe-vm-workspace-animation.sh" "$test_client_path" "$PLUGIN_PATH"
 
