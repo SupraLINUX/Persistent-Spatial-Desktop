@@ -587,3 +587,24 @@ The fractional CI now requires the legacy control to pass instead of accepting
 its failure, then explicitly reapplies the effective fractional monitor scale
 before launching the dedicated probe. This prevents plugin lifecycle/config
 reload effects from silently returning the dedicated pass to scale 1.0.
+
+
+#### HiDPI internal-unit diagnostic — after CI #240
+
+CI #240 showed that the first 0.1.7 conversion attempt did not change the
+legacy fractional result: the externally requested 96-unit offset still
+correlated as 96 screenshot pixels at effective scale 1.6. The tracked
+workspace state also reported `actual=96`, despite the source containing the
+new logical-to-render multiplication.
+
+Before changing the conversion again, plugin state now records the exact
+internal values seen during each legacy apply: monitor scale, logical
+`m_size`, physical `m_pixelSize`, requested logical offset, computed render
+offset, and the animated variable value immediately after
+`setValueAndWarp()`. The render probe also requires
+`pluginVersion == 0.1.7`, ruling out a stale plugin artifact.
+
+The fractional legacy pass is temporarily diagnostic again so the dedicated
+pass can still execute after the internal values are captured. This
+instrumentation is intentionally non-architectural and should be removed or
+narrowed once the coordinate-space mismatch is resolved.

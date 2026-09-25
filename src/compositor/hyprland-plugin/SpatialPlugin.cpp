@@ -40,6 +40,18 @@ struct MonitorTransformState
     std::vector<PresentationWindowTransform> presentationWindows;
 };
 
+struct LegacyOffsetConversionDiagnostic
+{
+    bool valid = false;
+    std::string monitorName;
+    double monitorScale = 1.0;
+    Vector2D monitorSize;
+    Vector2D monitorPixelSize;
+    Vector2D logicalRequested;
+    Vector2D renderRequested;
+    Vector2D actualAfterApply;
+};
+
 struct NativeWorkspaceAnimationConflict
 {
     bool valid = false;
@@ -85,6 +97,7 @@ uint64_t g_nextWorkspaceGeneration = 1;
 uint64_t g_workspaceSwitchResetCount = 0;
 uint64_t g_nativeWorkspaceAnimationConflictCount = 0;
 NativeWorkspaceAnimationConflict g_lastNativeWorkspaceAnimationConflict;
+LegacyOffsetConversionDiagnostic g_lastLegacyOffsetConversion;
 
 bool workspaceHasExplicitFullscreen(const PHLWORKSPACE &workspace)
 {
@@ -396,6 +409,17 @@ void applyOffset(const PHLWORKSPACE &workspace, const Vector2D &logicalOffset)
 
     rememberWorkspace(workspace);
     workspace->m_renderOffset->setValueAndWarp(renderOffset);
+
+    g_lastLegacyOffsetConversion = {
+        .valid = true,
+        .monitorName = monitor ? monitor->m_name : std::string{},
+        .monitorScale = monitor ? monitor->m_scale : 1.0,
+        .monitorSize = monitor ? monitor->m_size : Vector2D{},
+        .monitorPixelSize = monitor ? monitor->m_pixelSize : Vector2D{},
+        .logicalRequested = logicalOffset,
+        .renderRequested = renderOffset,
+        .actualAfterApply = workspace->m_renderOffset->value(),
+    };
 
     if (monitor)
         g_pHyprRenderer->damageMonitor(monitor);
@@ -879,6 +903,25 @@ std::string stateResponse(eHyprCtlOutputFormat format, std::string)
             workspace->m_renderOffset->isBeingAnimated() ? "true" : "false");
     }
 
+    std::string lastLegacyOffsetConversion = "null";
+    if (g_lastLegacyOffsetConversion.valid) {
+        const auto &diag = g_lastLegacyOffsetConversion;
+        lastLegacyOffsetConversion = std::format(
+            R"json({{"monitor":"{}","monitorScale":{:.6f},"monitorSizeX":{:.6f},"monitorSizeY":{:.6f},"monitorPixelSizeX":{:.6f},"monitorPixelSizeY":{:.6f},"logicalRequestedX":{:.6f},"logicalRequestedY":{:.6f},"renderRequestedX":{:.6f},"renderRequestedY":{:.6f},"actualAfterApplyX":{:.6f},"actualAfterApplyY":{:.6f}}})json",
+            jsonEscape(diag.monitorName),
+            diag.monitorScale,
+            diag.monitorSize.x,
+            diag.monitorSize.y,
+            diag.monitorPixelSize.x,
+            diag.monitorPixelSize.y,
+            diag.logicalRequested.x,
+            diag.logicalRequested.y,
+            diag.renderRequested.x,
+            diag.renderRequested.y,
+            diag.actualAfterApply.x,
+            diag.actualAfterApply.y);
+    }
+
     std::string lastNativeConflict = "null";
     if (g_lastNativeWorkspaceAnimationConflict.valid) {
         const auto &conflict = g_lastNativeWorkspaceAnimationConflict;
@@ -895,7 +938,7 @@ std::string stateResponse(eHyprCtlOutputFormat format, std::string)
     }
 
     return std::format(
-        R"json({{"trackedTransforms":[{}],"touchedWorkspaceCount":{},"trackedPresentationWindowCount":{},"presentationOffsets":[{}],"workspaceSwitchResetCount":{},"dedicatedPresentationOffsets":[{}],"dedicatedDamageRequests":[{}],"monitorRenderCounts":[{}],"fullscreenDedicatedResetCounts":[{}],"activeWorkspaceAnimations":[{}],"nativeWorkspaceAnimationConflictCount":{},"lastNativeWorkspaceAnimationConflict":{},"gestureEventsEnabled":{},"gestureActive":{}}})json",
+        R"json({{"trackedTransforms":[{}],"touchedWorkspaceCount":{},"trackedPresentationWindowCount":{},"presentationOffsets":[{}],"workspaceSwitchResetCount":{},"dedicatedPresentationOffsets":[{}],"dedicatedDamageRequests":[{}],"monitorRenderCounts":[{}],"fullscreenDedicatedResetCounts":[{}],"activeWorkspaceAnimations":[{}],"lastLegacyOffsetConversion":{},"nativeWorkspaceAnimationConflictCount":{},"lastNativeWorkspaceAnimationConflict":{},"gestureEventsEnabled":{},"gestureActive":{}}})json",
         transforms,
         g_touchedWorkspaces.size(),
         std::accumulate(
@@ -912,6 +955,7 @@ std::string stateResponse(eHyprCtlOutputFormat format, std::string)
         monitorRenderCounts,
         fullscreenDedicatedResetCounts,
         activeWorkspaceAnimations,
+        lastLegacyOffsetConversion,
         g_nativeWorkspaceAnimationConflictCount,
         lastNativeConflict,
         g_gestureEventsEnabled ? "true" : "false",
@@ -954,6 +998,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle)
     g_dedicatedDamageRequestCounts.clear();
     g_monitorRenderCounts.clear();
     g_fullscreenDedicatedResetCounts.clear();
+    g_lastLegacyOffsetConversion = {};
     g_dedicatedPresentationAvailable = installDedicatedPresentationHook();
 
     bool success = true;

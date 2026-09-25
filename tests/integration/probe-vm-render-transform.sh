@@ -138,6 +138,7 @@ import sys
 
 data = json.loads(sys.argv[1])
 assert data["protocolVersion"] == 3, data
+assert data["pluginVersion"] == "0.1.7", data
 assert data["spatialRenderOffsetExperimental"] is True, data
 assert data["monitorTargeting"] is True, data
 backend = sys.argv[2]
@@ -814,6 +815,33 @@ PY
     local client_state
     compositor_state="$(hyprctl -j psd-plugin-state)"
     client_state="$(hyprctl -j clients)"
+
+    if [[ "$RENDER_BACKEND" == "legacy" ]]; then
+        python3 - "$compositor_state" "$mode" <<'PY'
+import json
+import sys
+
+state = json.loads(sys.argv[1])
+mode = sys.argv[2]
+diag = state.get("lastLegacyOffsetConversion")
+if not diag:
+    raise SystemExit(
+        f"PSD render probe: {mode} missing legacy conversion diagnostic: {state}"
+    )
+
+print(
+    "PSD render probe: "
+    f"{mode} legacy conversion diagnostic "
+    f"monitor={diag.get('monitor')} "
+    f"scale={diag.get('monitorScale')} "
+    f"size=({diag.get('monitorSizeX')},{diag.get('monitorSizeY')}) "
+    f"pixelSize=({diag.get('monitorPixelSizeX')},{diag.get('monitorPixelSizeY')}) "
+    f"logical=({diag.get('logicalRequestedX')},{diag.get('logicalRequestedY')}) "
+    f"render=({diag.get('renderRequestedX')},{diag.get('renderRequestedY')}) "
+    f"actualAfterApply=({diag.get('actualAfterApplyX')},{diag.get('actualAfterApplyY')})"
+)
+PY
+    fi
 
     python3 - "$compositor_state" "$client_state" "$mode" "$target_title" "$logical_offset" "$RENDER_BACKEND" "$monitor_name" <<'PY'
 import json

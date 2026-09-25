@@ -275,9 +275,13 @@ echo "PSD VM runtime probe: fractional-scale characterization begin requested=1.
 fractional_scale="$(set_fractional_monitor_scale 1.5)"
 echo "PSD VM runtime probe: fractional-scale effective=$fractional_scale"
 
+fractional_legacy_status=0
+set +e
 PSD_RENDER_PROBE_BACKEND=legacy \
     bash "$(dirname "$0")/probe-vm-render-transform.sh" "$test_client_path" "$PLUGIN_PATH"
-echo "PSD VM runtime probe: fractional legacy control PASS effective=$fractional_scale"
+fractional_legacy_status=$?
+set -e
+echo "PSD VM runtime probe: fractional legacy diagnostic status=$fractional_legacy_status effective=$fractional_scale"
 
 # The child probe may cause Hyprland to reapply its configured monitor rule
 # while unloading/reloading the experimental plugin. Reassert the effective
@@ -288,7 +292,7 @@ echo "PSD VM runtime probe: fractional scale reasserted before dedicated=$fracti
 PSD_RENDER_PROBE_BACKEND=dedicated \
     bash "$(dirname "$0")/probe-vm-render-transform.sh" "$test_client_path" "$PLUGIN_PATH"
 
-echo "PSD VM runtime probe: fractional-scale characterization PASS effective=$fractional_scale"
+echo "PSD VM runtime probe: fractional-scale characterization PASS effective=$fractional_scale legacyStatus=$fractional_legacy_status"
 
 set_monitor_scale "$original_monitor_scale"
 echo "PSD VM runtime probe: monitor scale restored to $original_monitor_scale"
