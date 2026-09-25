@@ -253,32 +253,72 @@ print(f"{int(at[0])},{int(at[1])},{int(size[0])},{int(size[1])}")
 capture_output() {
     local path="$1"
 
-    # Normalize screencopy to one image pixel per Wayland layout/logical unit.
-    # grim otherwise chooses an output image scale independently, which makes
-    # fractional-scale PNG coordinates unsuitable for direct PSD geometry
-    # correlation.
+    # Keep grim deterministic, but do not assume its PNG raster is logical or
+    # physical. The probe calibrates that relation from the image dimensions
+    # and Hyprland's live output mode/scale.
     grim -s 1 -o "$monitor_name" "$path"
     [[ -s "$path" ]]
+}
 
-    python3 - "$path" "$monitor_width" "$monitor_height" "$monitor_scale" <<'PY' >/dev/null
+screenshot_scale_for() {
+    local path="$1"
+
+    python3 - "$path" "$monitor_width" "$monitor_height" "$monitor_scale" <<'PY'
 from PIL import Image
 import sys
 
 image = Image.open(sys.argv[1])
-pixel_width = int(sys.argv[2])
-pixel_height = int(sys.argv[3])
-scale = float(sys.argv[4])
+pixel_width = float(sys.argv[2])
+pixel_height = float(sys.argv[3])
+monitor_scale = float(sys.argv[4])
 
-expected = (
-    round(pixel_width / scale),
-    round(pixel_height / scale),
-)
+logical_width = pixel_width / monitor_scale
+logical_height = pixel_height / monitor_scale
+sx = image.width / logical_width
+sy = image.height / logical_height
 
-if image.size != expected:
+if abs(sx - sy) > 0.02:
     raise SystemExit(
-        "PSD render probe: normalized screenshot dimensions mismatch "
-        f"actual={image.size} expected={expected} scale={scale}"
+        "PSD render probe: screenshot coordinate scale is anisotropic "
+        f"sx={sx:.6f} sy={sy:.6f} image={image.size} "
+        f"mode=({pixel_width},{pixel_height}) monitorScale={monitor_scale}"
     )
+
+print(f"{(sx + sy) / 2.0:.8f}")
+PY
+}
+
+screenshot_offset_for() {
+    local path="$1"
+    local logical_offset="$2"
+    local screenshot_scale
+
+    screenshot_scale="$(screenshot_scale_for "$path")"
+    python3 - "$logical_offset" "$screenshot_scale" <<'PY'
+import sys
+
+logical_offset = float(sys.argv[1])
+screenshot_scale = float(sys.argv[2])
+print(round(logical_offset * screenshot_scale))
+PY
+}
+
+log_screenshot_calibration() {
+    local path="$1"
+    local screenshot_scale
+
+    screenshot_scale="$(screenshot_scale_for "$path")"
+    python3 - "$path" "$monitor_width" "$monitor_height" "$monitor_scale" "$screenshot_scale" "$RENDER_BACKEND" <<'PY'
+from PIL import Image
+import sys
+
+image = Image.open(sys.argv[1])
+print(
+    "PSD render probe: screenshot calibration "
+    f"backend={sys.argv[6]} image={image.size[0]}x{image.size[1]} "
+    f"mode={sys.argv[2]}x{sys.argv[3]} monitorScale={sys.argv[4]} "
+    f"screenshotPxPerLogical={float(sys.argv[5]):.6f}"
+)
 PY
 }
 
@@ -757,14 +797,15 @@ PY
         logical_offset=-96
     fi
 
-    local screenshot_offset
-    screenshot_offset="$logical_offset"
+    local screenshot_offset=""
 
     local baseline="$work_dir/$mode-baseline.png"
     local shifted="$work_dir/$mode-shifted.png"
     local restored="$work_dir/$mode-restored.png"
 
     capture_output "$baseline"
+    screenshot_offset="$(screenshot_offset_for "$baseline" "$logical_offset")"
+    log_screenshot_calibration "$baseline"
 
     apply_transform "$logical_offset" | grep -qx "ok"
     sleep 0.2
@@ -1003,6 +1044,8 @@ PY
     local popup_pixels_ready=0
     for _ in $(seq 1 60); do
         capture_output "$baseline"
+    screenshot_offset="$(screenshot_offset_for "$baseline" "$logical_offset")"
+    log_screenshot_calibration "$baseline"
         if python3 - "$baseline" <<'PY' >/dev/null 2>&1
 from PIL import Image
 import sys
@@ -1032,8 +1075,7 @@ PY
     geometry_before="$(client_geometry "$target_title")"
 
     local logical_offset=96
-    local screenshot_offset
-    screenshot_offset="$logical_offset"
+    local screenshot_offset=""
 
     apply_transform "$logical_offset" | grep -qx "ok"
     sleep 0.2
@@ -1184,6 +1226,8 @@ PY
     local child_pixels_ready=0
     for _ in $(seq 1 60); do
         capture_output "$baseline"
+    screenshot_offset="$(screenshot_offset_for "$baseline" "$logical_offset")"
+    log_screenshot_calibration "$baseline"
         if python3 - "$baseline" <<'PY' >/dev/null 2>&1
 from PIL import Image
 import sys
@@ -1213,8 +1257,7 @@ PY
     geometry_before="$(client_geometry "$target_title")"
 
     local logical_offset=96
-    local screenshot_offset
-    screenshot_offset="$logical_offset"
+    local screenshot_offset=""
 
     apply_transform "$logical_offset" | grep -qx "ok"
     sleep 0.2
@@ -1347,10 +1390,11 @@ PY
     geometry_before="$(client_geometry "$target_title")"
 
     local logical_offset=96
-    local screenshot_offset
-    screenshot_offset="$logical_offset"
+    local screenshot_offset=""
 
     capture_output "$baseline"
+    screenshot_offset="$(screenshot_offset_for "$baseline" "$logical_offset")"
+    log_screenshot_calibration "$baseline"
     assert_decoration_translation "$baseline" "$baseline" 0 "$mode baseline"
 
     apply_transform "$logical_offset" | grep -qx "ok"
@@ -1481,10 +1525,11 @@ PY
     geometry_before="$(client_geometry "$target_title")"
 
     local logical_offset=96
-    local screenshot_offset
-    screenshot_offset="$logical_offset"
+    local screenshot_offset=""
 
     capture_output "$baseline"
+    screenshot_offset="$(screenshot_offset_for "$baseline" "$logical_offset")"
+    log_screenshot_calibration "$baseline"
     wait_for_counter_quiet "monitorRenderCounts" "$mode baseline render"
 
     local damage_before

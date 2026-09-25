@@ -515,3 +515,25 @@ the 96 logical PSD units against 96 normalized screenshot pixels.
 No compositor/backend code changed in this correction. The purpose is to test
 the unit contract PSD actually exposes rather than an incidental screenshot
 tool scale.
+
+
+#### Fractional-scale raster calibration — CI #237
+
+CI #237 showed that `grim -s 1` still produced a 1280x800 PNG for the
+1280x800 output at monitor scale 1.6. Therefore `-s 1` cannot be treated as a
+guarantee that one image pixel equals one PSD logical unit on this compositor
+path.
+
+The probe now measures the screenshot coordinate factor instead of assuming
+it. For transform 0 it derives the monitor's logical extent as
+`pixelSize / monitorScale`, compares that with the actual PNG dimensions, and
+computes `screenshotPxPerLogical`. Every translation expectation is then
+`logicalOffset * screenshotPxPerLogical`.
+
+The fractional run also executes the legacy backend first as a diagnostic
+control and records its exit status without preventing the dedicated backend
+from running. This is useful because the legacy path primarily uses
+`CWorkspace::m_renderOffset`, while its pinned compensation and the dedicated
+POC both use `CWindow::m_floatingOffset`. A split result will therefore
+localize any scale-unit mismatch rather than attributing it generically to
+screencopy or HiDPI.
