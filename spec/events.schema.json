@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://supralinux.github.io/psd/spec/events.schema.json",
+  "title": "PSD Event Description",
+  "type": "object",
+  "required": [
+    "name",
+    "version",
+    "payload"
+  ],
+  "properties": {
+    "name": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*(\\.[a-z][a-zA-Z0-9-]*)+$"
+    },
+    "version": {
+      "type": "string",
+      "const": "0.1"
+    },
+    "description": {
+      "type": "string"
+    },
+    "payload": {
+      "type": "object"
+    },
+    "permissions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true
+    }
+  },
+  "additionalProperties": false
+}

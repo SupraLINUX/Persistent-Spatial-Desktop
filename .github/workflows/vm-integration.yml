@@ -1,0 +1,52 @@
+name: vm-integration
+
+concurrency:
+  group: psd-vm-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+on:
+  workflow_dispatch:
+
+jobs:
+  ubuntu-26-04-qemu:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install QEMU host dependencies
+        run: |
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            cloud-image-utils \
+            curl \
+            libgl1-mesa-dri \
+            openssh-client \
+            ovmf \
+            qemu-system-gui \
+            qemu-system-x86 \
+            qemu-utils
+
+      - name: Cache Ubuntu Minimal 26.04 image
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/psd-vm
+          key: ubuntu-26.04-minimal-cloudimg-amd64-20260827
+
+      - name: Validate VM integration scripts
+        run: bash -n tests/integration/*.sh
+
+      - name: Run Ubuntu 26.04 VM integration
+        run: bash tests/integration/run-qemu-vm.sh
+
+      - name: Upload QEMU diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: psd-qemu-vm-diagnostics
+          path: |
+            ${{ runner.temp }}/psd-qemu-vm/qemu.log
+            ${{ runner.temp }}/psd-qemu-vm/qemu-serial.log
+          if-no-files-found: ignore

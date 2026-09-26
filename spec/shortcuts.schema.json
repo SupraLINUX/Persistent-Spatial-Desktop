@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://supralinux.github.io/psd/spec/shortcuts.schema.json",
+  "title": "PSD Shortcut Binding",
+  "type": "object",
+  "required": [
+    "action",
+    "binding"
+  ],
+  "properties": {
+    "action": {
+      "type": "string"
+    },
+    "binding": {
+      "type": "string"
+    },
+    "enabled": {
+      "type": "boolean",
+      "default": true
+    },
+    "allowConflict": {
+      "type": "boolean",
+      "default": false
+    }
+  },
+  "additionalProperties": false
+}

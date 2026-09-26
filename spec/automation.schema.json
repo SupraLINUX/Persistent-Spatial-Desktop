@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://supralinux.github.io/psd/spec/automation.schema.json",
+  "title": "PSD Automation Request",
+  "type": "object",
+  "required": [
+    "mode",
+    "action"
+  ],
+  "properties": {
+    "mode": {
+      "enum": [
+        "direct",
+        "visual",
+        "guided"
+      ]
+    },
+    "action": {
+      "type": "string"
+    },
+    "arguments": {
+      "type": "object",
+      "default": {}
+    },
+    "requester": {
+      "type": "string"
+    },
+    "allowHumanInterruption": {
+      "type": "boolean",
+      "const": true
+    },
+    "visual": {
+      "type": "object",
+      "properties": {
+        "highlight": {
+          "type": "boolean",
+          "default": true
+        },
+        "surfaceChoreography": {
+          "type": "boolean",
+          "default": true
+        },
+        "ghostCursor": {
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

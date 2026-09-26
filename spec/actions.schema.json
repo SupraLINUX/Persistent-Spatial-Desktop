@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://supralinux.github.io/psd/spec/actions.schema.json",
+  "title": "PSD Semantic Action",
+  "type": "object",
+  "required": [
+    "name",
+    "version",
+    "description",
+    "arguments",
+    "result",
+    "permissions"
+  ],
+  "properties": {
+    "name": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*(\\.[a-z][a-zA-Z0-9-]*)+$"
+    },
+    "version": {
+      "type": "string",
+      "const": "0.1"
+    },
+    "description": {
+      "type": "string"
+    },
+    "arguments": {
+      "type": "object"
+    },
+    "result": {
+      "type": "object"
+    },
+    "permissions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true
+    },
+    "supportsVisualChoreography": {
+      "type": "boolean",
+      "default": false
+    }
+  },
+  "additionalProperties": false
+}

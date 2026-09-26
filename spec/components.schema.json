@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://supralinux.github.io/psd/spec/components.schema.json",
+  "title": "PSD.UI Component Description",
+  "type": "object",
+  "required": [
+    "name",
+    "category",
+    "apiVersion"
+  ],
+  "properties": {
+    "name": {
+      "type": "string"
+    },
+    "category": {
+      "enum": [
+        "foundation",
+        "control",
+        "surface",
+        "navigation",
+        "window"
+      ]
+    },
+    "apiVersion": {
+      "type": "string",
+      "const": "0.1"
+    },
+    "properties": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object"
+      }
+    },
+    "signals": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object"
+      }
+    },
+    "slots": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true
+    },
+    "accessibilityRole": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": false
+}
