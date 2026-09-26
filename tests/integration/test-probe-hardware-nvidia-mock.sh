@@ -153,6 +153,7 @@ set -euo pipefail
 
 fullscreen_state="${PSD_HW_MOCK_FULLSCREEN_STATE:?}"
 client_title_state="${PSD_HW_MOCK_CLIENT_TITLE_STATE:?}"
+offset_state="${PSD_HW_MOCK_OFFSET_STATE:?}"
 title=""
 
 while (( $# > 0 )); do
@@ -180,6 +181,10 @@ trap cleanup EXIT
 trap terminate TERM INT
 
 printf '%s\n' "$title" >"$client_title_state"
+
+# Mirror SpatialPlugin::onFullscreen(): explicit fullscreen clears any
+# dedicated presentation offset for the monitor before scanout eligibility.
+rm -f "$offset_state"
 touch "$fullscreen_state"
 
 while :; do
