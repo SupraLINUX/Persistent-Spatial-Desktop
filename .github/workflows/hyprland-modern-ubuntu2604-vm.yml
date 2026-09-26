@@ -1,0 +1,156 @@
+name: hyprland-modern-ubuntu2604-vm
+
+concurrency:
+  group: psd-hyprland-modern-vm-${{ github.ref }}
+  cancel-in-progress: true
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - experiment/hyprland-0562-ubuntu2604
+    paths:
+      - .github/workflows/hyprland-modern-ubuntu2604-vm.yml
+      - tests/integration/run-qemu-vm.sh
+      - tests/integration/probe-modern-hyprland-coexistence.sh
+      - tests/compat/run-hyprland-modern-audit.sh
+      - tests/compat/patches/**
+
+jobs:
+  build-private-runtime:
+    name: Build private Hyprland v0.56.2 runtime
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    container:
+      image: ubuntu:26.04
+
+    steps:
+      - name: Checkout experiment
+        uses: actions/checkout@v4
+
+      - name: Build audited private runtime
+        env:
+          HYPRLAND_TAG: v0.56.2
+        run: bash tests/compat/run-hyprland-modern-audit.sh
+
+      - name: Pack private runtime
+        run: |
+          set -euo pipefail
+          prefix="${RUNNER_TEMP}/psd-hyprland-modern-audit/prefix"
+          test -x "$prefix/bin/Hyprland"
+          tar -C "$prefix" -czf "${RUNNER_TEMP}/hyprland-modern-runtime.tar.gz" .
+
+      - name: Upload private runtime
+        uses: actions/upload-artifact@v4
+        with:
+          name: hyprland-modern-runtime
+          path: ${{ runner.temp }}/hyprland-modern-runtime.tar.gz
+          if-no-files-found: error
+          retention-days: 7
+
+  psd-plugin-v0562:
+    name: PSD plugin / Hyprland v0.56.2 API compatibility
+    needs: build-private-runtime
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    container:
+      image: ubuntu:26.04
+
+    steps:
+      - name: Install plugin build dependencies
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \\
+            build-essential \\
+            ca-certificates \\
+            cmake \\
+            hyprland-dev \\
+            libgles-dev \\
+            ninja-build \\
+            pkgconf
+
+      - name: Checkout experiment
+        uses: actions/checkout@v4
+
+      - name: Download private runtime
+        uses: actions/download-artifact@v4
+        with:
+          name: hyprland-modern-runtime
+          path: ${{ runner.temp }}/hyprland-modern-runtime
+
+      - name: Restore pinned v0.56.2 development prefix
+        run: |
+          set -euo pipefail
+          prefix="${RUNNER_TEMP}/psd-hyprland-modern-audit/prefix"
+          rm -rf "${RUNNER_TEMP}/psd-hyprland-modern-audit"
+          mkdir -p "$prefix"
+          tar -xzf "${RUNNER_TEMP}/hyprland-modern-runtime/hyprland-modern-runtime.tar.gz" -C "$prefix"
+          test "$(PKG_CONFIG_PATH="$prefix/share/pkgconfig:$prefix/lib/pkgconfig" pkg-config --modversion hyprland)" = "0.56.2"
+
+      - name: Compile PSD plugin against v0.56.2 headers
+        run: |
+          set -euo pipefail
+          prefix="${RUNNER_TEMP}/psd-hyprland-modern-audit/prefix"
+          export PKG_CONFIG_PATH="$prefix/share/pkgconfig:$prefix/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
+          export CMAKE_PREFIX_PATH="$prefix${CMAKE_PREFIX_PATH:+:$CMAKE_PREFIX_PATH}"
+          export LIBRARY_PATH="$prefix/lib:${LIBRARY_PATH:-}"
+          export LDFLAGS="-L$prefix/lib ${LDFLAGS:-}"
+          cmake -S . -B build-plugin-v0562 -G Ninja \\
+            -DCMAKE_BUILD_TYPE=Debug \\
+            -DPSD_BUILD_SHELL=OFF \\
+            -DPSD_BUILD_HYPRLAND_PLUGIN=ON \\
+            -DBUILD_TESTING=OFF
+          cmake --build build-plugin-v0562 --target psd-hyprland-plugin --parallel 2
+
+  ubuntu-26-04-qemu:
+    name: Ubuntu 26.04 VM / private Hyprland coexistence
+    needs: build-private-runtime
+    runs-on: ubuntu-26.04
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout experiment
+        uses: actions/checkout@v4
+
+      - name: Install QEMU host dependencies
+        run: |
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            cloud-image-utils \
+            curl \
+            libgl1-mesa-dri \
+            openssh-client \
+            ovmf \
+            qemu-system-gui \
+            qemu-system-x86 \
+            qemu-utils
+
+      - name: Cache Ubuntu Minimal 26.04 image
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/psd-vm
+          key: ubuntu-26.04-minimal-cloudimg-amd64-20260827
+
+      - name: Download private runtime
+        uses: actions/download-artifact@v4
+        with:
+          name: hyprland-modern-runtime
+          path: ${{ runner.temp }}/hyprland-modern-runtime
+
+      - name: Validate integration scripts
+        run: bash -n tests/integration/*.sh
+
+      - name: Run private-runtime coexistence probe
+        env:
+          PSD_MODERN_HYPRLAND_ARCHIVE: ${{ runner.temp }}/hyprland-modern-runtime/hyprland-modern-runtime.tar.gz
+        run: bash tests/integration/run-qemu-vm.sh
+
+      - name: Upload QEMU diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: psd-modern-hyprland-qemu-diagnostics
+          path: |
+            ${{ runner.temp }}/psd-qemu-vm/qemu.log
+            ${{ runner.temp }}/psd-qemu-vm/qemu-serial.log
+          if-no-files-found: ignore
