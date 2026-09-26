@@ -13,6 +13,7 @@ on:
 jobs:
   ubuntu-26-04:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     container:
       image: ubuntu:26.04
 
@@ -43,7 +44,7 @@ jobs:
             exit 1
           fi
           bash tests/integration/test-probe-live-session-mock.sh
-          bash tests/integration/test-probe-hardware-nvidia-mock.sh
+          timeout 30s bash tests/integration/test-probe-hardware-nvidia-mock.sh
 
       - name: Configure
         run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug
@@ -56,6 +57,7 @@ jobs:
 
   hyprland-plugin-26-04:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     container:
       image: ubuntu:26.04
 

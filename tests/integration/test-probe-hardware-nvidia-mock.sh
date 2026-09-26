@@ -170,7 +170,14 @@ done
 cleanup() {
     rm -f "$fullscreen_state" "$client_title_state"
 }
-trap cleanup EXIT TERM INT
+
+terminate() {
+    cleanup
+    exit 0
+}
+
+trap cleanup EXIT
+trap terminate TERM INT
 
 printf '%s\n' "$title" >"$client_title_state"
 touch "$fullscreen_state"
