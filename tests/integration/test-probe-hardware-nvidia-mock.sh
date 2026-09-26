@@ -200,6 +200,25 @@ reset_state() {
     printf '%s\n' 0 >"$direct_state"
 }
 
+run_preflight() {
+    env \
+        PATH="$tmp_dir/bin:$PATH" \
+        HYPRLAND_INSTANCE_SIGNATURE=mock \
+        PSD_HW_PREFLIGHT=1 \
+        PSD_HW_TEST_MODE=1 \
+        PSD_HW_TEST_SYSFS_ROOT="$tmp_dir/sys" \
+        PSD_HW_MONITOR=DP-1 \
+        PSD_HW_MOCK_LOG="$mock_log" \
+        PSD_HW_MOCK_PLUGIN_STATE="$plugin_state" \
+        PSD_HW_MOCK_OFFSET_STATE="$offset_state" \
+        PSD_HW_MOCK_DIRECT_STATE="$direct_state" \
+        PSD_HW_MOCK_FULLSCREEN_STATE="$fullscreen_state" \
+        PSD_HW_MOCK_CLIENT_TITLE_STATE="$client_title_state" \
+        PSD_HW_MOCK_SCANOUT_MODE=active \
+        PSD_HW_MOCK_VRR=true \
+        bash "$probe" "$fake_plugin" "$fake_client"
+}
+
 run_probe() {
     local scanout_mode="$1"
     local vrr="$2"
@@ -231,6 +250,14 @@ assert_clean() {
     [[ ! -e "$fullscreen_state" ]]
     [[ ! -e "$client_title_state" ]]
 }
+
+# 0. Preflight read-only: no opt-in, no plugin load, no direct-scanout mutation.
+reset_state
+output="$(run_preflight)"
+grep -q 'hardware preflight: PASS (read-only; no runtime state changed)' <<<"$output"
+! grep -q '^plugin load ' "$mock_log"
+! grep -q '^keyword render:direct_scanout ' "$mock_log"
+assert_clean
 
 # 1. Camino nominal: direct scanout + VRR.
 reset_state

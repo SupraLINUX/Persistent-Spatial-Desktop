@@ -998,6 +998,19 @@ does **not** rewrite monitor rules or force VRR, because doing so could destroy
 unreconstructable user monitor configuration. VRR must already become active
 through the normal Hyprland configuration to certify that path.
 
+Before the mutating hardware run, a read-only preflight is available:
+
+```bash
+PSD_HW_PREFLIGHT=1 tests/integration/probe-hardware-nvidia.sh
+```
+
+Preflight does not require the flicker opt-in, does not load/unload the plugin,
+does not change focus, does not change `render:direct_scanout`, and does not
+apply a PSD offset. It validates the session/backend, NVIDIA DRM modesetting,
+the target connector, build artifacts and current VRR/direct-scanout state. If
+the PSD plugin is already loaded, it also validates its protocol/capabilities
+without changing plugin state.
+
 The hardware sequence is:
 
 1. apply a non-zero dedicated PSD presentation offset;

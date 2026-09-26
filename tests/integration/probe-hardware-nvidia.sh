@@ -7,6 +7,16 @@ CLIENT_PATH="${2:-build/tests/psd-integration-client}"
 required_confirmation="I_UNDERSTAND_DISPLAY_MAY_FLICKER"
 
 test_mode="${PSD_HW_TEST_MODE:-0}"
+preflight="${PSD_HW_PREFLIGHT:-0}"
+
+case "$preflight" in
+    0|1) ;;
+    *)
+        echo "PSD NVIDIA hardware probe: PSD_HW_PREFLIGHT must be 0 or 1." >&2
+        exit 64
+        ;;
+esac
+
 case "$test_mode" in
     0)
         sysfs_root="/sys"
@@ -24,7 +34,7 @@ case "$test_mode" in
         ;;
 esac
 
-if [[ "${PSD_HW_CONFIRM:-}" != "$required_confirmation" ]]; then
+if [[ "$preflight" != "1" && "${PSD_HW_CONFIRM:-}" != "$required_confirmation" ]]; then
     cat >&2 <<EOF
 PSD NVIDIA hardware probe: explicit opt-in required.
 
@@ -191,6 +201,49 @@ data=json.load(sys.stdin)
 print(int(data["int"]))
 ')"
 
+plugin_loaded="$(hyprctl -j plugin list | python3 -c '
+import json,sys
+print("true" if any(x.get("name")=="psd-hyprland-plugin" for x in json.load(sys.stdin)) else "false")
+')"
+
+if [[ "$preflight" == "1" ]]; then
+    echo "PSD NVIDIA hardware preflight: environment"
+    echo "  Hyprland target: 0.53.3"
+    echo "  monitor: $target_monitor id=$target_id scale=$target_scale transform=$target_transform"
+    echo "  connector: $drm_connector"
+    echo "  DRM driver: $drm_driver"
+    echo "  format: $target_format"
+    echo "  VRR now: $target_vrr"
+    echo "  render:direct_scanout now: $original_direct_scanout"
+    echo "  PSD plugin already loaded: $plugin_loaded"
+    echo "  plugin artifact: $PLUGIN_PATH"
+    echo "  integration client: $CLIENT_PATH"
+    echo "  NVIDIA GPU(s):"
+    while IFS= read -r gpu; do
+        echo "    $gpu"
+    done <<<"$gpu_summary"
+
+    if [[ "$plugin_loaded" == "true" ]]; then
+        capabilities="$(hyprctl -j psd-plugin)"
+        python3 - "$capabilities" <<'PY'
+import json
+import sys
+
+data = json.loads(sys.argv[1])
+assert data["protocolVersion"] == 3, data
+assert data["pluginVersion"] == "0.1.10", data
+assert data["dedicatedPresentationOffsetExperimental"] is True, data
+assert data["diagnosticStateQueryExperimental"] is True, data
+PY
+        echo "  loaded PSD plugin capabilities: PASS"
+    else
+        echo "  loaded PSD plugin capabilities: not checked (plugin is not loaded)"
+    fi
+
+    echo "PSD NVIDIA hardware preflight: PASS (read-only; no runtime state changed)"
+    exit 0
+fi
+
 plugin_loaded_by_probe=0
 client_pid=""
 test_title="psd-hw-scanout-$BASHPID"
@@ -220,11 +273,6 @@ cleanup() {
     fi
 }
 trap cleanup EXIT INT TERM
-
-plugin_loaded="$(hyprctl -j plugin list | python3 -c '
-import json,sys
-print("true" if any(x.get("name")=="psd-hyprland-plugin" for x in json.load(sys.stdin)) else "false")
-')"
 
 if [[ "$plugin_loaded" != "true" ]]; then
     hyprctl plugin load "$PLUGIN_PATH" | grep -qx "ok"
